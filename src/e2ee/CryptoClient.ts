@@ -573,7 +573,7 @@ export class CryptoClient {
      * an error if the event is undecryptable.
      */
     @requiresReady()
-    public async decryptRoomEvent(event: EncryptedRoomEvent, roomId: string): Promise<RoomEvent<unknown>> {
+    public async decryptRoomEvent(event: EncryptedRoomEvent, roomId: string): Promise<RoomEvent<any>> {
         if (event.algorithm !== EncryptionAlgorithm.MegolmV1AesSha2) {
             throw new Error("Unable to decrypt: Unknown algorithm");
         }
