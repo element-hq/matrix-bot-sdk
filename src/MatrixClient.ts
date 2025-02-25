@@ -287,11 +287,11 @@ export class MatrixClient extends EventEmitter {
     @timedMatrixClientFunctionCall()
     public async getCapabilities(): Promise<MatrixCapabilities> {
         if (!this.cachedCapabilites || (Date.now() - this.capabilitesLastFetched) >= CAPABILITES_CACHE_MS) {
-            this.cachedCapabilites = await this.doRequest("GET", "/_matrix/client/v3/capabilities");
+            this.cachedCapabilites = (await this.doRequest("GET", "/_matrix/client/v3/capabilities")).capabilities;
             this.capabilitesLastFetched = Date.now();
         }
 
-        return this.cachedVersions;
+        return this.cachedCapabilites;
     }
 
     /**
