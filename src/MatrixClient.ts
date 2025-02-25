@@ -48,10 +48,12 @@ import { IKeyBackupInfo, IKeyBackupInfoRetrieved, IKeyBackupInfoUnsigned, IKeyBa
 import { MatrixError } from "./models/MatrixError";
 import { MXCUrl } from "./models/MXCUrl";
 import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
+import { MatrixCapabilities } from "./models/Capabilities";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
 const VERSIONS_CACHE_MS = 7200000; // 2 hours
+const CAPABILITES_CACHE_MS = 7200000; // 2 hours
 
 /**
  * A client that is capable of interacting with a matrix homeserver.
@@ -106,6 +108,8 @@ export class MatrixClient extends EventEmitter {
     private readonly unstableApisInstance = new UnstableApis(this);
     private cachedVersions: ServerVersions;
     private versionsLastFetched = 0;
+    private cachedCapabilites: MatrixCapabilities;
+    private capabilitesLastFetched = 0;
 
     /**
      * Set this to true to have the client only persist the sync token after the sync
@@ -273,6 +277,20 @@ export class MatrixClient extends EventEmitter {
         }
 
         return event;
+    }
+
+    /**
+     * Get the set of capabilites for the authenticated client.
+     * @returns {Promise<MatrixCapabilities>} Resolves to the server's supported versions.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getCapabilities(): Promise<MatrixCapabilities> {
+        if (!this.cachedCapabilites || (Date.now() - this.capabilitesLastFetched) >= CAPABILITES_CACHE_MS) {
+            this.cachedCapabilites = (await this.doRequest("GET", "/_matrix/client/v3/capabilities")).capabilities;
+            this.capabilitesLastFetched = Date.now();
+        }
+
+        return this.cachedCapabilites;
     }
 
     /**
