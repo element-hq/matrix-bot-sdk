@@ -24,14 +24,14 @@ export interface MatrixCapabilities {
     "m.set_displayname"?: BooleanCapability;
     /**
      * Describes the default and available room versions a server supports, and at what level of stability.
-     * 
+     *
      * Any room version not marked as "stable" should be considered "unstable"
      */
     "m.room_versions"?: {
         "available": {
-            [version: string]: "stable"|string,
-        }
-        "default": string,
-    },
-    [key: string]: unknown
+            [version: string]: "stable"|string;
+        };
+        "default": string;
+    };
+    [key: string]: unknown;
 }

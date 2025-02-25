@@ -279,7 +279,6 @@ export class MatrixClient extends EventEmitter {
         return event;
     }
 
-
     /**
      * Get the set of capabilites for the authenticated client.
      * @returns {Promise<MatrixCapabilities>} Resolves to the server's supported versions.
