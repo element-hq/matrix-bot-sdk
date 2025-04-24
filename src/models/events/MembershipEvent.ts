@@ -50,7 +50,7 @@ export class MembershipEvent extends StateEvent<MembershipEventContent> {
     public get ownMembership(): boolean {
         return this.membershipFor === this.sender;
     }
-    
+
     /**
      * The reason why a user may have sent this membership.
      */
