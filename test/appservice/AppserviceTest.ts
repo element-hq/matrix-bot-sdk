@@ -3360,4 +3360,68 @@ describe('Appservice', () => {
             http.flushAllExpected(),
         ]);
     });
+    it("should handle a ping request", async () => {
+        const port = await getPort();
+        const hsToken = "s3cret_token";
+        const hsUrl = "https://localhost";
+        const asId = 'my-id';
+        const appservice = new Appservice({
+            port: port,
+            bindAddress: '',
+            homeserverName: 'example.org',
+            homeserverUrl: hsUrl,
+            registration: {
+                id: asId,
+                as_token: "",
+                hs_token: hsToken,
+                sender_localpart: "_bot_",
+                namespaces: {
+                    users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
+                    rooms: [],
+                    aliases: [],
+                },
+            },
+        });
+
+        appservice.botIntent.ensureRegistered = () => {
+            return null;
+        };
+
+        const http = new HttpBackend();
+        setRequestFn(http.requestFn);
+
+        // AS -> HS
+        let txnId;
+        http.when("POST", `/_matrix/client/v1/appservice/${asId}/ping`).respond(200, (_path, content) => {
+            expect(content.transaction_id).toBeDefined();
+            txnId = content.transaction_id;
+            // Note. We can't do an async thing here so instead we return immediately.
+            return {
+                duration_ms: 100,
+            };
+        });
+
+        await Promise.all([
+            appservice.pingHomeserver(),
+            http.flushAllExpected(),
+        ]);
+        await appservice.begin();
+
+        // Mock the HS -> AS route.
+        try {
+            const req = await fetch(
+                `http://localhost:${port}/_matrix/app/v1/ping`, {
+                    method: 'POST',
+                    body: JSON.stringify({ transaction_id: txnId }),
+                    headers: {
+                        "Authorization": `Bearer ${hsToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+            expect(await req.json()).toEqual({});
+            expect(req.status).toBe(200);
+        } finally {
+            appservice.stop();
+        }
+    });
 });

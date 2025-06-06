@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import * as morgan from "morgan";
 import * as LRU from "lru-cache";
 import { stringify } from "querystring";
+import { randomUUID } from "crypto";
 
 import { Intent } from "./Intent";
 import {
@@ -238,6 +239,8 @@ export class Appservice extends EventEmitter {
     private readonly cryptoStorage: IAppserviceCryptoStorageProvider;
     private readonly bridgeInstance = new MatrixBridge(this);
 
+    private pingRequest?: string;
+
     private app = express();
     private appServer: any;
     private intentsCache: LRU.LRUCache<string, Intent>;
@@ -317,6 +320,7 @@ export class Appservice extends EventEmitter {
         this.app.post("/unstable/org.matrix.msc3983/keys/claim", this.onKeysClaim.bind(this));
         this.app.post("/_matrix/app/v1/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
         this.app.post("/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
+        this.app.post("/_matrix/app/v1/ping", this.onPing.bind(this));
 
         // We register the 404 handler in the `begin()` function to allow consumers to add their own endpoints.
 
@@ -619,6 +623,14 @@ export class Appservice extends EventEmitter {
         return this.botClient.doRequest("PUT", `/_matrix/client/v3/directory/list/appservice/${networkId}/${roomId}`, null, {
             visibility,
         });
+    }
+
+    public async pingHomeserver() {
+        if (!this.registration.id) {
+            throw Error('No `id` given in registration information. Cannot ping homeserver');
+        }
+        this.pingRequest = randomUUID();
+        return this.botClient.doRequest("POST", `/_matrix/client/v1/appservice/${this.registration.id}/ping`, undefined, { transaction_id: this.pingRequest });
     }
 
     private async processEphemeralEvent(event: any): Promise<any> {
@@ -1149,5 +1161,26 @@ export class Appservice extends EventEmitter {
 
     private onThirdpartyLocation(req: express.Request, res: express.Response) {
         return this.handleThirdpartyObject(req, res, "location", req.query["alias"] as string);
+    }
+
+    private onPing(req: express.Request, res: express.Response) {
+        if (!this.isAuthed(req)) {
+            res.status(401).json({ errcode: "AUTH_FAILED", error: "Authentication failed" });
+            return;
+        }
+        if (typeof (req.body) !== "object") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "Expected JSON" });
+            return;
+        }
+        if (!this.pingRequest) {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "No ping request expected" });
+            return;
+        }
+        if (req.body.transaction_id !== this.pingRequest) {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "transaction_id did not match" });
+            return;
+        }
+        this.pingRequest = undefined;
+        res.status(200).json({});
     }
 }
