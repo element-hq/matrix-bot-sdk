@@ -133,7 +133,7 @@ describe('CryptoClient', () => {
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
             expect(client.crypto.clientDeviceEd25519).toBeTruthy();
