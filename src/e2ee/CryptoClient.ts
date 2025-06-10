@@ -85,7 +85,6 @@ export class CryptoClient {
             throw new Error("Encryption not possible: server not revealing device ID");
         }
 
-
         const storagePath = await this.storage.getMachineStoragePath(deviceId);
 
         if (storedDeviceId !== deviceId) {
