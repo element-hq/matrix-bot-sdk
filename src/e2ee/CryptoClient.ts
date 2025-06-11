@@ -85,8 +85,6 @@ export class CryptoClient {
             throw new Error("Encryption not possible: server not revealing device ID");
         }
 
-        LogService.info("CryptoClient", "Starting with device ID:", this.deviceId); // info so all bots know for debugging
-
         const storagePath = await this.storage.getMachineStoragePath(deviceId);
 
         if (storedDeviceId !== deviceId) {
@@ -94,7 +92,7 @@ export class CryptoClient {
         }
         this.deviceId = deviceId;
 
-        LogService.debug("CryptoClient", `Starting ${userId} with device ID:`, this.deviceId);
+        LogService.info("CryptoClient", `Starting ${userId} with device ID:`, this.deviceId); // info so all bots know for debugging
 
         const machine = await OlmMachine.initialize(
             new UserId(userId),
@@ -109,7 +107,7 @@ export class CryptoClient {
         this.deviceCurve25519 = identity.curve25519.toBase64();
         this.deviceEd25519 = identity.ed25519.toBase64();
 
-        LogService.debug("CryptoClient", "Running with device Ed25519 identity:", this.deviceEd25519); // info so all bots know for debugging
+        LogService.info("CryptoClient", `Running ${userId} with device Ed25519 identity:`, this.deviceEd25519); // info so all bots know for debugging
 
         this.ready = true;
     }
