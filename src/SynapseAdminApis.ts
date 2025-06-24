@@ -52,6 +52,11 @@ export interface SynapseUserProperties extends SynapseUser {
      * The password for the user. Leave undefined to leave unchanged.
      */
     password?: string;
+
+    /**
+     * If set to false, devices aren't logged out even when a password is provided.
+     */
+    logout_devices?: boolean;
 }
 
 /**
