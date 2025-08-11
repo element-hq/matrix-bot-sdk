@@ -75,7 +75,7 @@ export class PLManager {
         return this.createEvent.sender;
     }
 
-    public get currentPL() {
+    public get currentPL(): PowerLevelsEventContent {
         return {
             ...DEFAULT_PL,
             ...this.powerLevels,
