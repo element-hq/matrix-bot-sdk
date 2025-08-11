@@ -82,7 +82,7 @@ export class PLManager {
         };
     }
 
-    public get defaultPL() {
+    public get defaultPL(): number {
         return this.powerLevels?.users_default ?? 0;
     }
 
