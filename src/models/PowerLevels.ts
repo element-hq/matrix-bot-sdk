@@ -106,7 +106,7 @@ export class PLManager {
         }
     }
 
-    public canAdjustUserPL(userId: string) {
+    public canAdjustUserPL(userId: string): boolean {
         if (this.areCreatorsPriviledged) {
             return !this.creators.has(userId);
         }
