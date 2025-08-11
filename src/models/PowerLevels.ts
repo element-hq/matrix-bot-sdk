@@ -57,7 +57,7 @@ export class PLManager {
 
     public readonly creators: Set<string>;
 
-    public static areCreatorsPriviledged(roomVersion: string) {
+    public static areCreatorsPriviledged(roomVersion: string): boolean {
         return CREATOR_ROOM_VERSIONS.includes(roomVersion);
     }
 
