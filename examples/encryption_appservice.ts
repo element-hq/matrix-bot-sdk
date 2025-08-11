@@ -47,7 +47,7 @@ const registration: IAppserviceRegistration = {
         aliases: [],
     },
     "de.sorunome.msc2409.push_ephemeral": true,
-    url: null,
+    "url": null,
 };
 
 const options: IAppserviceOptions = {
