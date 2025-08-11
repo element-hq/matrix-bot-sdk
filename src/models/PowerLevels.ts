@@ -61,7 +61,7 @@ export class PLManager {
         return CREATOR_ROOM_VERSIONS.includes(roomVersion);
     }
 
-    public get areCreatorsPriviledged() {
+    public get areCreatorsPriviledged(): boolean {
         return (
             !!this.createEvent.content.room_version &&
             CREATOR_ROOM_VERSIONS.includes(
