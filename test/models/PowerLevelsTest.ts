@@ -14,7 +14,7 @@ type TestCandidate = [
         canAdjustPL: boolean;
         creatorPL: number;
     },
-    { room_version?: string; additional_creators?: readonly string[] },
+    { room_version?: string, additional_creators?: readonly string[] },
     PowerLevelsEventContent | undefined,
 ];
 
@@ -124,8 +124,8 @@ const StateSets: TestCandidate[] = [
     ],
 ];
 
-describe("PLManager", function () {
-    it("should throw if the room is missing create state", function () {
+describe("PLManager", function() {
+    it("should throw if the room is missing create state", function() {
         expect(() => PLManager.createFromRoomState([])).toThrow(
             "Could not find create event for room, cannot handle",
         );
@@ -145,25 +145,24 @@ describe("PLManager", function () {
             content: plContent,
         };
 
-        // eslint-disable-next-line mocha/no-setup-in-describe
-        describe(`with room version ${createEvent.content.room_version} and extra creators=${createEvent.content.additional_creators}`, function () {
+        describe(`with room version ${createEvent.content.room_version} and extra creators=${createEvent.content.additional_creators}`, function() {
             let plManager: PLManager;
 
-            beforeEach(function () {
+            beforeEach(function() {
                 plManager = PLManager.createFromRoomState([
                     createEvent,
                     ...(powerLevelEvent ? [powerLevelEvent] : []),
                 ]);
             });
 
-            it(`Get correct set of creators with room version`, function () {
+            it(`Get correct set of creators with room version`, function() {
                 expect(plManager.getFirstCreator).toEqual(PrimaryCreator);
                 expect([...plManager.creators]).toEqual(
                     expected.creators,
                 );
             });
 
-            it(`Correctly calculates canAdjustUserPL`, function () {
+            it(`Correctly calculates canAdjustUserPL`, function() {
                 for (const creator of plManager.creators) {
                     expect(plManager.canAdjustUserPL(creator)).toEqual(
                         expected.canAdjustPL,
@@ -171,7 +170,7 @@ describe("PLManager", function () {
                 }
             });
 
-            it(`Correctly calculates getUserPowerLevel`, function () {
+            it(`Correctly calculates getUserPowerLevel`, function() {
                 expect(plManager.getUserPowerLevel(PrimaryCreator)).toEqual(
                     expected.creatorPL,
                 );

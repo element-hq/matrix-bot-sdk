@@ -2,7 +2,7 @@ import {
     type MatrixClient,
     type PowerLevelsEventContent,
     UserID,
-} from ".."
+} from "..";
 
 const CREATOR_ROOM_VERSIONS = ["12", "org.matrix.hydra.11"];
 
