@@ -17,13 +17,11 @@ import { Presence } from "./models/Presence";
 import { Membership, MembershipEvent } from "./models/events/MembershipEvent";
 import { RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
 import { EventContext } from "./models/EventContext";
-import { PowerLevelBounds } from "./models/PowerLevelBounds";
 import { EventKind } from "./models/events/EventKind";
 import { IdentityClient } from "./identity/IdentityClient";
 import { OpenIDConnectToken } from "./models/OpenIDConnect";
 import { doHttpRequest, DoHttpRequestOpts } from "./http";
 import { Space, SpaceCreateOptions } from "./models/Spaces";
-import { PowerLevelAction } from "./models/PowerLevelAction";
 import { CryptoClient } from "./e2ee/CryptoClient";
 import {
     FallbackKey,
@@ -49,6 +47,7 @@ import { MatrixError } from "./models/MatrixError";
 import { MXCUrl } from "./models/MXCUrl";
 import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
+import { PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
