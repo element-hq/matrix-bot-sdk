@@ -2617,7 +2617,7 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, ""), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
         });
 
@@ -2635,7 +2635,7 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
         });
 
@@ -2661,7 +2661,7 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, ""), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
             expect(result["processed"]).toBeTruthy();
         });
@@ -2689,7 +2689,7 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
             expect(result["processed"]).toBeTruthy();
         });
