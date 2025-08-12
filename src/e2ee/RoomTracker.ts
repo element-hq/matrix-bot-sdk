@@ -49,7 +49,7 @@ export class RoomTracker {
 
         let encEvent: Partial<EncryptionEventContent>;
         try {
-            encEvent = await this.client.getRoomStateEvent(roomId, "m.room.encryption", "");
+            encEvent = await this.client.getRoomStateEventContent(roomId, "m.room.encryption", "");
             encEvent.algorithm = encEvent.algorithm ?? 'UNKNOWN';
         } catch (e) {
             if (e instanceof MatrixError && e.errcode === "M_NOT_FOUND") {
@@ -62,8 +62,8 @@ export class RoomTracker {
         // Pick out the history visibility setting too
         let historyVisibility: string;
         try {
-            const ev = await this.client.getRoomStateEvent(roomId, "m.room.history_visibility", "");
-            historyVisibility = ev.history_visibility;
+            const ev = await this.client.getRoomStateEventContent(roomId, "m.room.history_visibility", "");
+            historyVisibility = ev.history_visibility as string;
         } catch (e) {
             // ignore - we'll just treat history visibility as normal
         }

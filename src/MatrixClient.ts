@@ -48,7 +48,7 @@ import { MatrixError } from "./models/MatrixError";
 import { MXCUrl } from "./models/MXCUrl";
 import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
-import { PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
+import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 import { CreateEvent } from "./models/events/CreateEvent";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
@@ -1780,7 +1780,7 @@ export class MatrixClient extends EventEmitter {
 
         const chaseCreates = async (findRoomId) => {
             try {
-                const createEvent = await this.getRoomStateEvent(findRoomId, "m.room.create", "");
+                const createEvent = (await this.getCreateEventForRoom(findRoomId)).content;
                 if (!createEvent) return;
 
                 if (findRoomId === roomId && !result.current) {
@@ -1800,9 +1800,8 @@ export class MatrixClient extends EventEmitter {
                     let tombstoneEventId = null;
                     let prevVersion = "1";
                     try {
-                        const roomState = await this.getRoomState(prevRoomId);
-                        const tombstone = roomState.find(e => e['type'] === 'm.room.tombstone' && e['state_key'] === '');
-                        const create = roomState.find(e => e['type'] === 'm.room.create' && e['state_key'] === '');
+                        const tombstone = await this.getRoomStateEventBody(prevRoomId, 'm.room.tombstone');
+                        const create = await this.getCreateEventForRoom(prevRoomId);
 
                         if (tombstone) {
                             if (!tombstone['content']) tombstone['content'] = {};
@@ -1811,8 +1810,7 @@ export class MatrixClient extends EventEmitter {
                         }
 
                         if (create) {
-                            if (!create['content']) create['content'] = {};
-                            prevVersion = create['content']['room_version'] || "1";
+                            prevVersion = create.version;
                         }
                     } catch (e) {
                         // state not available
@@ -1833,30 +1831,25 @@ export class MatrixClient extends EventEmitter {
 
         const chaseTombstones = async (findRoomId) => {
             try {
-                const tombstoneEvent = await this.getRoomStateEvent(findRoomId, "m.room.tombstone", "");
+                const tombstoneEvent = await this.getRoomStateEventContent(findRoomId, "m.room.tombstone", "");
                 if (!tombstoneEvent) return;
                 if (!tombstoneEvent['replacement_room']) return;
 
-                const newRoomId = tombstoneEvent['replacement_room'];
+                const newRoomId = tombstoneEvent['replacement_room'] as string;
                 if (newRoomId === findRoomId) return; // Recursion is bad
                 if (result.newer.find(r => r.roomId === newRoomId)) return; // Already found
 
                 let newRoomVersion = "1";
                 let createEventId = null;
                 try {
-                    const roomState = await this.getRoomState(newRoomId);
-                    const create = roomState.find(e => e['type'] === 'm.room.create' && e['state_key'] === '');
+                    const create = await this.getCreateEventForRoom(newRoomId);
 
                     if (create) {
-                        if (!create['content']) create['content'] = {};
-
-                        const predecessor = create['content']['predecessor'] || {};
-                        const refPrevRoomId = predecessor['room_id'];
-                        if (refPrevRoomId === findRoomId) {
-                            createEventId = create['event_id'];
+                        if (create.content.predecessor?.room_id === findRoomId) {
+                            createEventId = create.eventId;
                         }
 
-                        newRoomVersion = create['content']['room_version'] || "1";
+                        newRoomVersion = create.version;
                     }
                 } catch (e) {
                     // state not available
@@ -1943,7 +1936,7 @@ export class MatrixClient extends EventEmitter {
     @timedMatrixClientFunctionCall()
     public async getSpace(roomIdOrAlias: string): Promise<Space> {
         const roomId = await this.resolveRoom(roomIdOrAlias);
-        const createEvent = await this.getRoomStateEvent(roomId, "m.room.create", "");
+        const createEvent = await this.getRoomStateEventContent(roomId, "m.room.create", "");
         if (createEvent["type"] !== "m.space") {
             throw new Error("Room is not a space");
         }
