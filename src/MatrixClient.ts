@@ -486,7 +486,7 @@ export class MatrixClient extends EventEmitter {
     public async getPublishedAlias(roomIdOrAlias: string): Promise<string> {
         try {
             const roomId = await this.resolveRoom(roomIdOrAlias);
-            const event = await this.getRoomStateEvent(roomId, "m.room.canonical_alias", "");
+            const event = await this.getRoomStateEventContent(roomId, "m.room.canonical_alias", "");
             if (!event) return null;
 
             const canonical = event['alias'];
@@ -952,7 +952,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public async getEvent(roomId: string, eventId: string): Promise<any> {
+    public async getEvent(roomId: string, eventId: string): Promise<APIRoomEvent|EncryptedRoomEvent> {
         const event = await this.getRawEvent(roomId, eventId);
         if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
             return this.processEvent((await this.crypto.decryptRoomEvent(new EncryptedRoomEvent(event), roomId)).raw);
@@ -967,7 +967,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public getRawEvent(roomId: string, eventId: string): Promise<any> {
+    public getRawEvent(roomId: string, eventId: string): Promise<APIRoomEvent> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/event/" + encodeURIComponent(eventId))
             .then(ev => this.processEvent(ev));
     }
@@ -978,7 +978,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any[]>} resolves to the room's state
      */
     @timedMatrixClientFunctionCall()
-    public getRoomState(roomId: string): Promise<any[]> {
+    public getRoomState(roomId: string): Promise<APIRoomStateEvent[]> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state")
             .then(state => Promise.all(state.map(ev => this.processEvent(ev))));
     }
@@ -989,19 +989,21 @@ export class MatrixClient extends EventEmitter {
      * @param {string} type the event type
      * @param {String} stateKey the state key, falsey if not needed
      * @returns {Promise<any|any[]>} resolves to the state event(s)
-     * @deprecated It is not possible to get an array of events - use getRoomStateEvent instead
+     * @deprecated It is not possible to get an array of events - use getRoomStateEventContent instead
      */
     @timedMatrixClientFunctionCall()
     public getRoomStateEvents(roomId, type, stateKey): Promise<any | any[]> {
-        return this.getRoomStateEvent(roomId, type, stateKey);
+        return this.getRoomStateEventContent(roomId, type, stateKey);
     }
 
     /**
      * Gets a state event for a given room of a given type under the given state key.
-     * @param {string} roomId the room ID
-     * @param {string} type the event type
-     * @param {String} stateKey the state key
-     * @returns {Promise<any>} resolves to the state event
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event
+     * @throws If the event could not be found or you do not have access to the room.
+     * @deprecated Use `getRoomStateEventContent` instead.
      */
     @timedMatrixClientFunctionCall()
     public getRoomStateEvent(roomId, type, stateKey): Promise<any> {
@@ -1011,6 +1013,43 @@ export class MatrixClient extends EventEmitter {
             + encodeURIComponent(stateKey ? stateKey : '');
         return this.doRequest("GET", path)
             .then(ev => this.processEvent(ev));
+    }
+
+    /**
+     * Gets a state event's `content` for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key.
+     * @returns resolves to the state event content
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    public async getRoomStateEventContent(roomId: string, type: string, stateKey = ''): Promise<APIRoomStateEvent["content"]> {
+        const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
+        const data = await this.doRequest("GET", path, { format: "content" });
+        return this.processEvent(data);
+    }
+
+    /**
+     * Gets a state event's full event body for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event body
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    public async getRoomStateEventBody(roomId: string, type: string, stateKey = ''): Promise<APIRoomStateEvent> {
+        // https://spec.matrix.org/unstable/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey
+        if (this.doesServerSupportVersion("v1.16")) {
+            const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
+            const data = await this.doRequest("GET", path, { format: "event" });
+            return this.processEvent(data);
+        }
+        // Compatability with older implementations.
+        const eventRaw = (await this.getRoomState(roomId)).find(ev => ev.type === type && ev.state_key === stateKey);
+        if (!eventRaw) {
+            // To ensure compatibility, throw a not found error.
+            throw new MatrixError({ errcode: 'M_NOT_FOUND', error: 'Could not find state event in full room state (SDK Error).' }, 404, {});
+        }
     }
 
     /**
