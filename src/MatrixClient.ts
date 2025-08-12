@@ -1560,7 +1560,7 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelFor(userId: string, roomId: string, eventType: string, isState: boolean): Promise<boolean> {
-        const pls = PLManager.createFromCreateAndPowerLevel(
+        const pls = new PLManager(
             await this.getCreateEventForRoom(roomId),
             await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
         );
@@ -1582,7 +1582,7 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelForAction(userId: string, roomId: string, action: PowerLevelAction): Promise<boolean> {
-        const pls = PLManager.createFromCreateAndPowerLevel(
+        const pls = new PLManager(
             await this.getCreateEventForRoom(roomId),
             await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
         );
@@ -1621,7 +1621,7 @@ export class MatrixClient extends EventEmitter {
         const canChangePower = await this.userHasPowerLevelFor(myUserId, roomId, "m.room.power_levels", true);
         if (!canChangePower) return { canModify: false, maximumPossibleLevel: 0 };
 
-        const pls = PLManager.createFromCreateAndPowerLevel(
+        const pls = new PLManager(
             await this.getCreateEventForRoom(roomId),
             await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
         );
