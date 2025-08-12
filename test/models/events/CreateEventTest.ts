@@ -4,12 +4,13 @@ import { CreateEvent } from "../../../src";
 describe("CreateEvent", () => {
     it("should return the right fields", () => {
         const ev = createMinimalEvent();
+        // Should never be used!
         ev.content['creator'] = '@bob:example.org';
         ev.content['m.federate'] = false;
         ev.content['room_version'] = '4';
         const obj = new CreateEvent(ev);
 
-        expect(obj.creator).toEqual(ev.content['creator']);
+        expect(obj.creator).toEqual(ev.sender);
         expect(obj.federated).toEqual(ev.content['m.federate']);
         expect(obj.version).toEqual(ev.content['room_version']);
     });

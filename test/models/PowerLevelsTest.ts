@@ -137,12 +137,20 @@ describe("PLManager", function() {
             state_key: "",
             sender: PrimaryCreator,
             content: createEventContent,
+            event_id: "$create",
+            origin_server_ts: 1,
+            room_id: "!unused",
+            unsigned: {},
         };
         const powerLevelEvent = plContent && {
             type: "m.room.power_levels",
             state_key: "",
             sender: PrimaryCreator,
-            content: plContent,
+            content: plContent as Record<string, unknown>,
+            event_id: "$create",
+            origin_server_ts: 1,
+            room_id: "!unused",
+            unsigned: {},
         };
 
         describe(`with room version ${createEvent.content.room_version} and extra creators=${createEvent.content.additional_creators}`, function() {

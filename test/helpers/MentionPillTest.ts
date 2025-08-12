@@ -41,7 +41,7 @@ describe('MentionPill', () => {
                 expect(uid).toEqual(userId);
                 return { displayname: displayName };
             });
-            const stateSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, eventType, stateKey) => {
+            const stateSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, eventType, stateKey) => {
                 throw new Error("Unexpected call");
             });
 
@@ -65,7 +65,7 @@ describe('MentionPill', () => {
             const profileSpy = simple.mock(client, "getUserProfile").callFn((uid) => {
                 throw new Error("Unexpected call");
             });
-            const stateSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, eventType, stateKey) => {
+            const stateSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, eventType, stateKey) => {
                 expect(rid).toBe(roomId);
                 expect(eventType).toBe("m.room.member");
                 expect(stateKey).toBe(userId);
@@ -90,7 +90,7 @@ describe('MentionPill', () => {
             const profileSpy = simple.mock(client, "getUserProfile").callFn((uid) => {
                 throw new Error("Simulated failure 1");
             });
-            const stateSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, eventType, stateKey) => {
+            const stateSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, eventType, stateKey) => {
                 throw new Error("Simulated failure 2");
             });
 
@@ -113,7 +113,7 @@ describe('MentionPill', () => {
             const profileSpy = simple.mock(client, "getUserProfile").callFn((uid) => {
                 throw new Error("Simulated failure 1");
             });
-            const stateSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, eventType, stateKey) => {
+            const stateSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, eventType, stateKey) => {
                 throw new Error("Simulated failure 2");
             });
 
@@ -162,7 +162,7 @@ describe('MentionPill', () => {
                 expect(ref).toBe(roomAlias);
                 return roomId;
             });
-            const getStateSpy = simple.mock(client, "getRoomStateEvent").callFn(async (sRoomId, type, stateKey) => {
+            const getStateSpy = simple.mock(client, "getRoomStateEventContent").callFn(async (sRoomId, type, stateKey) => {
                 expect(sRoomId).toBe(roomId);
                 expect(type).toBe("m.room.canonical_alias");
                 expect(stateKey).toBe("");

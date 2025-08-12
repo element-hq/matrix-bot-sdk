@@ -1,5 +1,4 @@
 import {
-    CreateEvent,
     type MatrixClient,
     type PowerLevelsEventContent,
     UserID,
