@@ -923,6 +923,7 @@ describe('Intent', () => {
                         aliases: [],
                         rooms: [],
                     },
+                    url: null,
                 },
             };
             intent = new Intent(options, userId, appservice);
