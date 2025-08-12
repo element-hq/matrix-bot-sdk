@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { htmlEncode } from "htmlencode";
 import { htmlToText } from "html-to-text";
+import { LRUCache } from "lru-cache";
 
 import { IStorageProvider } from "./storage/IStorageProvider";
 import { MemoryStorageProvider } from "./storage/MemoryStorageProvider";
@@ -15,7 +16,7 @@ import { timedMatrixClientFunctionCall } from "./metrics/decorators";
 import { AdminApis } from "./AdminApis";
 import { Presence } from "./models/Presence";
 import { Membership, MembershipEvent } from "./models/events/MembershipEvent";
-import { RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
+import { APIRoomEvent, APIRoomStateEvent, RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
 import { EventContext } from "./models/EventContext";
 import { EventKind } from "./models/events/EventKind";
 import { IdentityClient } from "./identity/IdentityClient";
@@ -48,11 +49,13 @@ import { MXCUrl } from "./models/MXCUrl";
 import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
 import { PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
+import { CreateEvent } from "./models/events/CreateEvent";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
 const VERSIONS_CACHE_MS = 7200000; // 2 hours
 const CAPABILITES_CACHE_MS = 7200000; // 2 hours
+const CREATE_EVENT_CACHE_SIZE = 256;
 
 /**
  * A client that is capable of interacting with a matrix homeserver.
@@ -109,6 +112,7 @@ export class MatrixClient extends EventEmitter {
     private versionsLastFetched = 0;
     private cachedCapabilites: MatrixCapabilities;
     private capabilitesLastFetched = 0;
+    private createEventCache = new LRUCache<string, CreateEvent>({ max: CREATE_EVENT_CACHE_SIZE });
 
     /**
      * Set this to true to have the client only persist the sync token after the sync
@@ -1486,6 +1490,25 @@ export class MatrixClient extends EventEmitter {
         return this.doRequest("POST", "/_matrix/client/v3/createRoom", null, properties).then(response => {
             return response['room_id'];
         });
+    }
+
+    /**
+     * Get the m.room.create event for a room, using the cached value if stored by the client.
+     * @param roomId The room ID
+     * @returns A create event.
+     * @throws If the room does not exist, or you are not able to access the room.
+     */
+    public async getCreateEventForRoom(roomId: string): Promise<CreateEvent> {
+        // Create events are immutable in a room so we can safely cache this forever.
+        const existing = this.createEventCache.get(roomId);
+        if (existing) {
+            return existing;
+        }
+        // We have to use getRoomState since no API exists to pull the full event, and we need the `sender` propety.
+        const createEventRaw = (await this.getRoomState(roomId)).find(ev => ev.type === 'm.room.create' && ev.state_key === '');
+        const createEvent = new CreateEvent(createEventRaw);
+        this.createEventCache.set(roomId, createEvent);
+        return createEvent;
     }
 
     /**
