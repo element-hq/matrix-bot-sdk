@@ -1560,23 +1560,17 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelFor(userId: string, roomId: string, eventType: string, isState: boolean): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = PLManager.createFromCreateAndPowerLevel(
+            await this.getCreateEventForRoom(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
+        );
 
         let requiredPower = isState ? 50 : 0;
-        if (isState && Number.isFinite(powerLevelsEvent["state_default"])) requiredPower = powerLevelsEvent["state_default"];
-        if (!isState && Number.isFinite(powerLevelsEvent["events_default"])) requiredPower = powerLevelsEvent["events_default"];
-        if (Number.isFinite(powerLevelsEvent["events"]?.[eventType])) requiredPower = powerLevelsEvent["events"][eventType];
+        if (isState && Number.isFinite(pls.currentPL["state_default"])) requiredPower = pls.currentPL["state_default"];
+        if (!isState && Number.isFinite(pls.currentPL["events_default"])) requiredPower = pls.currentPL["events_default"];
+        if (Number.isFinite(pls.currentPL["events"]?.[eventType])) requiredPower = pls.currentPL["events"][eventType];
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1588,12 +1582,10 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelForAction(userId: string, roomId: string, action: PowerLevelAction): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = PLManager.createFromCreateAndPowerLevel(
+            await this.getCreateEventForRoom(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
+        );
 
         const defaultForActions: { [A in PowerLevelAction]: number } = {
             [PowerLevelAction.Ban]: 50,
@@ -1605,15 +1597,11 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        let investigate = powerLevelsEvent;
+        let investigate: any = pls.currentPL;
         action.split('.').forEach(k => (investigate = investigate?.[k]));
         if (Number.isFinite(investigate)) requiredPower = investigate;
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1633,15 +1621,13 @@ export class MatrixClient extends EventEmitter {
         const canChangePower = await this.userHasPowerLevelFor(myUserId, roomId, "m.room.power_levels", true);
         if (!canChangePower) return { canModify: false, maximumPossibleLevel: 0 };
 
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            throw new Error("No power level event found");
-        }
+        const pls = PLManager.createFromCreateAndPowerLevel(
+            await this.getCreateEventForRoom(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels"),
+        );
 
-        let targetUserPower = 0;
-        let myUserPower = 0;
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][targetUserId]) targetUserPower = powerLevelsEvent["users"][targetUserId];
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][myUserId]) myUserPower = powerLevelsEvent["users"][myUserId];
+        const targetUserPower = pls.getUserPowerLevel(targetUserId);
+        const myUserPower = pls.getUserPowerLevel(myUserId);
 
         if (myUserId === targetUserId) {
             return { canModify: true, maximumPossibleLevel: myUserPower };
@@ -1666,7 +1652,7 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async setUserPowerLevel(userId: string, roomId: string, newLevel: number): Promise<any> {
-        const currentLevels = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
+        const currentLevels = await this.getRoomStateEventContent(roomId, "m.room.power_levels", "");
         if (!currentLevels['users']) currentLevels['users'] = {};
         currentLevels['users'][userId] = newLevel;
         await this.sendStateEvent(roomId, "m.room.power_levels", "", currentLevels);
