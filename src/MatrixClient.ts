@@ -1605,7 +1605,7 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        let investigate = pls.currentPL;
+        const investigate = pls.currentPL;
         let investigated: number | undefined;
         // Trivial object traversal with '.' seperator.
         action.split('.').forEach(k => (investigated = investigate?.[k]));
