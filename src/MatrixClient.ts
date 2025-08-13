@@ -1720,9 +1720,10 @@ export class MatrixClient extends EventEmitter {
      * state carried over. See the spec for which state will be carried over.
      * @param roomId The room to upgrade
      * @param newVersion The room version of the new room.
-     * @see https://spec.matrix.org/v1.15/client-server-api/#server-behaviour-19
+     * @see {@link https://spec.matrix.org/v1.15/client-server-api/#server-behaviour-19}
      * @returns The new room ID
      */
+    @timedMatrixClientFunctionCall()
     public async upgradeRoom(roomId: string, newVersion: string): Promise<string> {
         const req = await this.doRequest('POST', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/upgrade`, undefined, { new_version: newVersion });
         return req.replacement_room;
