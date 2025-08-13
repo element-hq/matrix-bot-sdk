@@ -1777,6 +1777,20 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
+     * Upgrade a room. This will call the room upgrade endpoint on the homeserver, which will create a new room with some of the
+     * state carried over. See the spec for which state will be carried over.
+     * @param roomId The room to upgrade
+     * @param newVersion The room version of the new room.
+     * @see {@link https://spec.matrix.org/v1.15/client-server-api/#server-behaviour-19}
+     * @returns The new room ID
+     */
+    @timedMatrixClientFunctionCall()
+    public async upgradeRoom(roomId: string, newVersion: string): Promise<string> {
+        const req = await this.doRequest('POST', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/upgrade`, undefined, { new_version: newVersion });
+        return req.replacement_room;
+    }
+
+    /**
      * Determines the upgrade history for a given room as a doubly-linked list styled structure. Given
      * a room ID in the history of upgrades, the resulting `previous` array will hold any rooms which
      * are older than the given room. The resulting `newer` array will hold any rooms which are newer

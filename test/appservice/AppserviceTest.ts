@@ -22,6 +22,7 @@ async function beginAppserviceWithProtocols(protocols: string[]) {
                 rooms: [],
                 aliases: [],
             },
+            url: null,
             protocols,
         },
     });
@@ -60,6 +61,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [],
                     },
+                    url: null,
                 },
             });
 
@@ -89,6 +91,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [],
                     },
+                    url: null,
                 },
             });
 
@@ -114,6 +117,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
@@ -134,6 +138,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
@@ -154,6 +159,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         expect(() => appservice.getUserIdForSuffix('foo')).toThrowError("Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix");
@@ -176,6 +182,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -197,6 +204,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -219,6 +227,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -241,6 +250,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -264,6 +274,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -286,6 +297,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -312,6 +324,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -335,6 +348,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -358,6 +372,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -400,6 +415,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -441,6 +457,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -462,6 +479,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -484,6 +502,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [],
                     },
+                    url: null,
                 },
             });
 
@@ -508,6 +527,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [],
                     },
+                    url: null,
                 },
             });
 
@@ -538,6 +558,7 @@ describe('Appservice', () => {
                             rooms: [],
                             aliases: [],
                         },
+                        url: null,
                     },
                 });
 
@@ -567,6 +588,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
                     },
+                    url: null,
                 },
             });
 
@@ -593,6 +615,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
@@ -616,6 +639,7 @@ describe('Appservice', () => {
                             rooms: [],
                             aliases: [],
                         },
+                        url: null,
                     },
                 });
 
@@ -641,6 +665,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
                     },
+                    url: null,
                 },
             });
 
@@ -665,6 +690,7 @@ describe('Appservice', () => {
                             rooms: [],
                             aliases: [],
                         },
+                        url: null,
                     },
                 });
 
@@ -690,6 +716,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
                     },
+                    url: null,
                 },
             });
 
@@ -714,6 +741,7 @@ describe('Appservice', () => {
                             rooms: [],
                             aliases: [],
                         },
+                        url: null,
                     },
                 });
 
@@ -742,6 +770,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
                     },
+                    url: null,
                 },
             });
 
@@ -766,6 +795,7 @@ describe('Appservice', () => {
                         rooms: [],
                         aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
                     },
+                    url: null,
                 },
             });
 
@@ -796,6 +826,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -845,6 +876,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -917,6 +949,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -978,6 +1011,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1035,6 +1069,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1103,6 +1138,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
                 // "de.sorunome.msc2409.push_ephemeral": true, // Shouldn't affect emission
             },
         });
@@ -1168,6 +1204,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
                 // "de.sorunome.msc2409.push_ephemeral": true, // Shouldn't affect emission
             },
         });
@@ -1378,6 +1415,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1444,6 +1482,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1524,6 +1563,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                "url": null,
                 "de.sorunome.msc2409.push_ephemeral": true,
             },
         });
@@ -1598,6 +1638,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1699,6 +1740,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                "url": null,
                 "de.sorunome.msc2409.push_ephemeral": true,
             },
         });
@@ -1786,6 +1828,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -1915,6 +1958,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2005,6 +2049,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2069,6 +2114,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2134,6 +2180,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2180,6 +2227,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2242,6 +2290,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2287,6 +2336,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2361,6 +2411,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2445,6 +2496,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2528,6 +2580,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2611,6 +2664,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2694,6 +2748,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2765,6 +2820,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2836,6 +2892,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2907,6 +2964,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -2983,6 +3041,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -3340,6 +3399,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -3380,6 +3440,7 @@ describe('Appservice', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 

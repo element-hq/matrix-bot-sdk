@@ -5736,6 +5736,24 @@ describe('MatrixClient', () => {
         });
     });
 
+    describe('upgradeRoom', () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
+            const userId = "@test:example.org";
+            const oldRoomId = "!myfakeroom";
+            const newRoomId = "!new-room-id";
+            const newRoomVersion = "any-ver";
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
+
+            http.when("POST", `/_matrix/client/v3/rooms/${encodeURIComponent(oldRoomId)}/upgrade`).respond(200, (path, content) => {
+                expect(content).toMatchObject({ new_version: newRoomVersion });
+                return { replacement_room: newRoomId };
+            });
+
+            const [result] = await Promise.all([client.upgradeRoom(oldRoomId, newRoomVersion), http.flushAllExpected()]);
+            expect(result).toEqual(newRoomId);
+        }));
+    });
+
     describe('getRoomUpgradeHistory', () => {
         it('should calculate the room upgrade history', async () => {
             const { client } = createTestClient();
