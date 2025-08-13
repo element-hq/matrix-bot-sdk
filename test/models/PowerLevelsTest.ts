@@ -146,7 +146,7 @@ describe("PLManager", function() {
             type: "m.room.power_levels",
             state_key: "",
             sender: PrimaryCreator,
-            content: plContent,
+            content: plContent as Record<string, unknown>,
             event_id: "$create",
             origin_server_ts: 1,
             room_id: "!unused",
