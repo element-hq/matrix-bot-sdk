@@ -1003,7 +1003,7 @@ export class MatrixClient extends EventEmitter {
      * @param stateKey the state key
      * @returns resolves to the state event
      * @throws If the event could not be found or you do not have access to the room.
-     * @deprecated Use `getRoomStateEventContent` instead.
+     * @deprecated Use {@link getRoomStateEventContent} instead.
      */
     @timedMatrixClientFunctionCall()
     public getRoomStateEvent(roomId, type, stateKey): Promise<any> {
@@ -1543,8 +1543,7 @@ export class MatrixClient extends EventEmitter {
         if (existing) {
             return existing;
         }
-        // We have to use getRoomState since no API exists to pull the full event, and we need the `sender` propety.
-        const createEventRaw = this.getRoomStateEventBody(roomId, "m.room.create", "");
+        const createEventRaw = await this.getRoomStateEventBody(roomId, "m.room.create", "");
         const createEvent = new CreateEvent(createEventRaw);
         this.createEventCache.set(roomId, createEvent);
         return createEvent;
