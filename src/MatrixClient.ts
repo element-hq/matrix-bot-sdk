@@ -1030,7 +1030,7 @@ export class MatrixClient extends EventEmitter {
             + encodeURIComponent(type) + "/"
             + encodeURIComponent(stateKey ? stateKey : '');
         const data = await this.doRequest("GET", path, { format: "content" });
-        return data;
+        return this.processEvent(data);
     }
 
     /**
