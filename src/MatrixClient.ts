@@ -1006,7 +1006,7 @@ export class MatrixClient extends EventEmitter {
      * @deprecated Use {@link getRoomStateEventContent} instead.
      */
     @timedMatrixClientFunctionCall()
-    public getRoomStateEvent(roomId, type, stateKey): Promise<any> {
+    public getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<any> {
         const path = "/_matrix/client/v3/rooms/"
             + encodeURIComponent(roomId) + "/state/"
             + encodeURIComponent(type) + "/"
@@ -1023,10 +1023,14 @@ export class MatrixClient extends EventEmitter {
      * @returns resolves to the state event content
      * @throws If the event could not be found or you do not have access to the room.
      */
+    @timedMatrixClientFunctionCall()
     public async getRoomStateEventContent(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent["content"]> {
-        const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
+        const path = "/_matrix/client/v3/rooms/"
+            + encodeURIComponent(roomId) + "/state/"
+            + encodeURIComponent(type) + "/"
+            + encodeURIComponent(stateKey ? stateKey : '');
         const data = await this.doRequest("GET", path, { format: "content" });
-        return this.processEvent(data);
+        return data;
     }
 
     /**
@@ -1037,10 +1041,14 @@ export class MatrixClient extends EventEmitter {
      * @returns resolves to the state event body
      * @throws If the event could not be found or you do not have access to the room.
      */
+    @timedMatrixClientFunctionCall()
     public async getRoomStateEventBody(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent> {
         // https://spec.matrix.org/unstable/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey
         if (await this.doesServerSupportVersion("v1.16")) {
-            const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
+            const path = "/_matrix/client/v3/rooms/"
+                + encodeURIComponent(roomId) + "/state/"
+                + encodeURIComponent(type) + "/"
+                + encodeURIComponent(stateKey ? stateKey : '');
             const data = await this.doRequest("GET", path, { format: "event" });
             return this.processEvent(data);
         }
@@ -1050,6 +1058,7 @@ export class MatrixClient extends EventEmitter {
             // To ensure compatibility, throw a not found error.
             throw new MatrixError({ errcode: 'M_NOT_FOUND', error: 'Could not find state event in full room state (SDK Error).' }, 404, {});
         }
+        return this.processEvent(eventRaw);
     }
 
     /**
@@ -1596,9 +1605,12 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        let investigate: any = pls.currentPL;
-        action.split('.').forEach(k => (investigate = investigate?.[k]));
-        if (Number.isFinite(investigate)) requiredPower = investigate;
+        let investigate = pls.currentPL;
+        let investigated: number | undefined;
+        // Trivial object traversal with '.' seperator.
+        action.split('.').forEach(k => (investigated = investigate?.[k]));
+        // Only accept numbers that are valid power levels.
+        if (Number.isFinite(investigated)) requiredPower = investigated;
 
         return pls.getUserPowerLevel(userId) >= requiredPower;
     }

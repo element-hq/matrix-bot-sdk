@@ -6,7 +6,7 @@ import {
 } from "../../src";
 
 const PrimaryCreator = "@alice:bar";
-const ExtraCreators = Object.freeze(["@bob:bar", "@charlie:bar"]);
+const ExtraCreators = ["@bob:bar", "@charlie:bar"];
 
 type TestCandidate = [
     {
@@ -14,7 +14,7 @@ type TestCandidate = [
         canAdjustPL: boolean;
         creatorPL: number;
     },
-    { room_version?: string, additional_creators?: readonly string[] },
+    { room_version?: string, additional_creators?: string[] },
     PowerLevelsEventContent | undefined,
 ];
 
@@ -146,7 +146,7 @@ describe("PLManager", function() {
             type: "m.room.power_levels",
             state_key: "",
             sender: PrimaryCreator,
-            content: plContent as Record<string, unknown>,
+            content: plContent,
             event_id: "$create",
             origin_server_ts: 1,
             room_id: "!unused",

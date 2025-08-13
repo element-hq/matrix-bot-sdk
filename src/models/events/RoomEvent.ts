@@ -85,14 +85,14 @@ export class StateEvent<T extends (Object | unknown) = unknown> extends RoomEven
  * Raw event as it appears on the CS API
  */
 export interface APIRoomEvent {
-    content: Record<string, Json>;
+    content: Record<string, unknown>;
     event_id: string;
     origin_server_ts: number;
     room_id: string;
     sender: string;
     state_key?: string;
     type: string;
-    unsigned: Record<string, Json>;
+    unsigned: Record<string, unknown>;
 }
 
 /**
