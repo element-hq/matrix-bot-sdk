@@ -43,6 +43,7 @@ describe('AutojoinUpgradedRoomsMixin', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 

@@ -177,6 +177,7 @@ describe('ProfileCache', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 

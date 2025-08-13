@@ -47,9 +47,9 @@ export interface IAppserviceRegistration {
     id?: string;
 
     /**
-     * Optional URL at which the application service can be contacted.
+     * URL at which the application service can be contacted. If not in use, this must be `null`.
      */
-    url?: string;
+    url: string|null;
 
     /**
      * The token the application service uses to communicate with the homeserver.
