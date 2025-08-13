@@ -1039,7 +1039,7 @@ export class MatrixClient extends EventEmitter {
      */
     public async getRoomStateEventBody(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent> {
         // https://spec.matrix.org/unstable/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey
-        if (this.doesServerSupportVersion("v1.16")) {
+        if (await this.doesServerSupportVersion("v1.16")) {
             const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
             const data = await this.doRequest("GET", path, { format: "event" });
             return this.processEvent(data);
@@ -1544,7 +1544,7 @@ export class MatrixClient extends EventEmitter {
             return existing;
         }
         // We have to use getRoomState since no API exists to pull the full event, and we need the `sender` propety.
-        const createEventRaw = (await this.getRoomState(roomId)).find(ev => ev.type === 'm.room.create' && ev.state_key === '');
+        const createEventRaw = this.getRoomStateEventBody(roomId, "m.room.create", "");
         const createEvent = new CreateEvent(createEventRaw);
         this.createEventCache.set(roomId, createEvent);
         return createEvent;
