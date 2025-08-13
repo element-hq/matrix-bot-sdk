@@ -1606,11 +1606,11 @@ export class MatrixClient extends EventEmitter {
         let requiredPower = defaultForActions[action];
 
         const investigate = pls.currentPL;
-        let investigated: number | undefined;
+        let investigated: number | Record<string, number>;
         // Trivial object traversal with '.' seperator.
         action.split('.').forEach(k => (investigated = investigate?.[k]));
         // Only accept numbers that are valid power levels.
-        if (Number.isFinite(investigated)) requiredPower = investigated;
+        if (typeof investigated === "number" && Number.isFinite(investigated)) requiredPower = investigated;
 
         return pls.getUserPowerLevel(userId) >= requiredPower;
     }
