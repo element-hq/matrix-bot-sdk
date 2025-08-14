@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { htmlEncode } from "htmlencode";
 import { htmlToText } from "html-to-text";
+import { LRUCache } from "lru-cache";
 
 import { IStorageProvider } from "./storage/IStorageProvider";
 import { MemoryStorageProvider } from "./storage/MemoryStorageProvider";
@@ -15,7 +16,7 @@ import { timedMatrixClientFunctionCall } from "./metrics/decorators";
 import { AdminApis } from "./AdminApis";
 import { Presence } from "./models/Presence";
 import { Membership, MembershipEvent } from "./models/events/MembershipEvent";
-import { RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
+import { APIRoomEvent, APIRoomStateEvent, RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
 import { EventContext } from "./models/EventContext";
 import { EventKind } from "./models/events/EventKind";
 import { IdentityClient } from "./identity/IdentityClient";
@@ -47,12 +48,15 @@ import { MatrixError } from "./models/MatrixError";
 import { MXCUrl } from "./models/MXCUrl";
 import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
-import { PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
+import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
+import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
+import { Json } from "./helpers/Types";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
 const VERSIONS_CACHE_MS = 7200000; // 2 hours
 const CAPABILITES_CACHE_MS = 7200000; // 2 hours
+const CREATE_EVENT_CACHE_SIZE = 256;
 
 /**
  * A client that is capable of interacting with a matrix homeserver.
@@ -109,6 +113,7 @@ export class MatrixClient extends EventEmitter {
     private versionsLastFetched = 0;
     private cachedCapabilites: MatrixCapabilities;
     private capabilitesLastFetched = 0;
+    private createEventCache = new LRUCache<string, CreateEvent>({ max: CREATE_EVENT_CACHE_SIZE });
 
     /**
      * Set this to true to have the client only persist the sync token after the sync
@@ -482,7 +487,7 @@ export class MatrixClient extends EventEmitter {
     public async getPublishedAlias(roomIdOrAlias: string): Promise<string> {
         try {
             const roomId = await this.resolveRoom(roomIdOrAlias);
-            const event = await this.getRoomStateEvent(roomId, "m.room.canonical_alias", "");
+            const event = await this.getRoomStateEventContent(roomId, "m.room.canonical_alias", "");
             if (!event) return null;
 
             const canonical = event['alias'];
@@ -948,7 +953,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public async getEvent(roomId: string, eventId: string): Promise<any> {
+    public async getEvent(roomId: string, eventId: string): Promise<APIRoomEvent|EncryptedRoomEvent> {
         const event = await this.getRawEvent(roomId, eventId);
         if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
             return this.processEvent((await this.crypto.decryptRoomEvent(new EncryptedRoomEvent(event), roomId)).raw);
@@ -963,7 +968,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public getRawEvent(roomId: string, eventId: string): Promise<any> {
+    public getRawEvent(roomId: string, eventId: string): Promise<APIRoomEvent> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/event/" + encodeURIComponent(eventId))
             .then(ev => this.processEvent(ev));
     }
@@ -974,7 +979,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any[]>} resolves to the room's state
      */
     @timedMatrixClientFunctionCall()
-    public getRoomState(roomId: string): Promise<any[]> {
+    public getRoomState(roomId: string): Promise<APIRoomStateEvent[]> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state")
             .then(state => Promise.all(state.map(ev => this.processEvent(ev))));
     }
@@ -985,28 +990,76 @@ export class MatrixClient extends EventEmitter {
      * @param {string} type the event type
      * @param {String} stateKey the state key, falsey if not needed
      * @returns {Promise<any|any[]>} resolves to the state event(s)
-     * @deprecated It is not possible to get an array of events - use getRoomStateEvent instead
+     * @deprecated It is not possible to get an array of events - use getRoomStateEventContent instead
      */
     @timedMatrixClientFunctionCall()
     public getRoomStateEvents(roomId, type, stateKey): Promise<any | any[]> {
-        return this.getRoomStateEvent(roomId, type, stateKey);
+        return this.getRoomStateEventContent(roomId, type, stateKey);
     }
 
     /**
      * Gets a state event for a given room of a given type under the given state key.
-     * @param {string} roomId the room ID
-     * @param {string} type the event type
-     * @param {String} stateKey the state key
-     * @returns {Promise<any>} resolves to the state event
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event
+     * @throws If the event could not be found or you do not have access to the room.
+     * @deprecated Use {@link getRoomStateEventContent} instead.
      */
     @timedMatrixClientFunctionCall()
-    public getRoomStateEvent(roomId, type, stateKey): Promise<any> {
+    public getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<any> {
         const path = "/_matrix/client/v3/rooms/"
             + encodeURIComponent(roomId) + "/state/"
             + encodeURIComponent(type) + "/"
             + encodeURIComponent(stateKey ? stateKey : '');
         return this.doRequest("GET", path)
             .then(ev => this.processEvent(ev));
+    }
+
+    /**
+     * Gets a state event's `content` for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key.
+     * @returns resolves to the state event content
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getRoomStateEventContent(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent["content"]> {
+        const path = "/_matrix/client/v3/rooms/"
+            + encodeURIComponent(roomId) + "/state/"
+            + encodeURIComponent(type) + "/"
+            + encodeURIComponent(stateKey);
+        const data = await this.doRequest("GET", path);
+        return data;
+    }
+
+    /**
+     * Gets a state event's full event body for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event body
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getRoomStateEventBody(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent> {
+        // https://spec.matrix.org/unstable/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey
+        if (await this.doesServerSupportVersion("v1.16")) {
+            const path = "/_matrix/client/v3/rooms/"
+                + encodeURIComponent(roomId) + "/state/"
+                + encodeURIComponent(type) + "/"
+                + encodeURIComponent(stateKey);
+            const data = await this.doRequest("GET", path, { format: "event" });
+            return this.processEvent(data);
+        }
+        // Compatability with older implementations.
+        const eventRaw = (await this.getRoomState(roomId)).find(ev => ev.type === type && ev.state_key === stateKey);
+        if (!eventRaw) {
+            // To ensure compatibility, throw a not found error.
+            throw new MatrixError({ errcode: 'M_NOT_FOUND', error: 'Could not find state event in full room state (SDK Error).' }, 404, {});
+        }
+        return this.processEvent(eventRaw);
     }
 
     /**
@@ -1489,32 +1542,44 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
+     * Get the m.room.create event for a room, using the cached value if stored by the client.
+     * @param roomId The room ID
+     * @returns A create event.
+     * @throws If the room does not exist, or you are not able to access the room.
+     */
+    public async getRoomCreateEvent(roomId: string): Promise<CreateEvent> {
+        // Create events are immutable in a room so we can safely cache this forever.
+        const existing = this.createEventCache.get(roomId);
+        if (existing) {
+            return existing;
+        }
+        const createEventRaw = await this.getRoomStateEventBody(roomId, "m.room.create", "");
+        const createEvent = new CreateEvent(createEventRaw);
+        this.createEventCache.set(roomId, createEvent);
+        return createEvent;
+    }
+
+    /**
      * Checks if a given user has a required power level required to send the given event.
-     * @param {string} userId the user ID to check the power level of
-     * @param {string} roomId the room ID to check the power level in
-     * @param {string} eventType the event type to look for in the `events` property of the power levels
-     * @param {boolean} isState true to indicate the event is intended to be a state event
-     * @returns {Promise<boolean>} resolves to true if the user has the required power level, resolves to false otherwise
+     * @param userId the user ID to check the power level of
+     * @param roomId the room ID to check the power level in
+     * @param eventType the event type to look for in the `events` property of the power levels
+     * @param isState true to indicate the event is intended to be a state event
+     * @returns resolves to true if the user has the required power level, resolves to false otherwise
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelFor(userId: string, roomId: string, eventType: string, isState: boolean): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
         let requiredPower = isState ? 50 : 0;
-        if (isState && Number.isFinite(powerLevelsEvent["state_default"])) requiredPower = powerLevelsEvent["state_default"];
-        if (!isState && Number.isFinite(powerLevelsEvent["events_default"])) requiredPower = powerLevelsEvent["events_default"];
-        if (Number.isFinite(powerLevelsEvent["events"]?.[eventType])) requiredPower = powerLevelsEvent["events"][eventType];
+        if (isState && Number.isFinite(pls.currentPL["state_default"])) requiredPower = pls.currentPL["state_default"];
+        if (!isState && Number.isFinite(pls.currentPL["events_default"])) requiredPower = pls.currentPL["events_default"];
+        if (Number.isFinite(pls.currentPL["events"]?.[eventType])) requiredPower = pls.currentPL["events"][eventType];
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1526,12 +1591,10 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelForAction(userId: string, roomId: string, action: PowerLevelAction): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
         const defaultForActions: { [A in PowerLevelAction]: number } = {
             [PowerLevelAction.Ban]: 50,
@@ -1543,15 +1606,15 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        let investigate = powerLevelsEvent;
+        let investigate = pls.currentPL as Json;
+        // Trivial object traversal with '.' seperator.
         action.split('.').forEach(k => (investigate = investigate?.[k]));
-        if (Number.isFinite(investigate)) requiredPower = investigate;
+        // Only accept numbers that are valid power levels.
+        if (typeof investigate === "number" && Number.isFinite(investigate)) {
+            requiredPower = investigate;
+        }
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1571,15 +1634,13 @@ export class MatrixClient extends EventEmitter {
         const canChangePower = await this.userHasPowerLevelFor(myUserId, roomId, "m.room.power_levels", true);
         if (!canChangePower) return { canModify: false, maximumPossibleLevel: 0 };
 
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
-        let targetUserPower = 0;
-        let myUserPower = 0;
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][targetUserId]) targetUserPower = powerLevelsEvent["users"][targetUserId];
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][myUserId]) myUserPower = powerLevelsEvent["users"][myUserId];
+        const targetUserPower = pls.getUserPowerLevel(targetUserId);
+        const myUserPower = pls.getUserPowerLevel(myUserId);
 
         if (myUserId === targetUserId) {
             return { canModify: true, maximumPossibleLevel: myUserPower };
@@ -1604,7 +1665,7 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async setUserPowerLevel(userId: string, roomId: string, newLevel: number): Promise<any> {
-        const currentLevels = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
+        const currentLevels = await this.getRoomStateEventContent(roomId, "m.room.power_levels", "");
         if (!currentLevels['users']) currentLevels['users'] = {};
         currentLevels['users'][userId] = newLevel;
         await this.sendStateEvent(roomId, "m.room.power_levels", "", currentLevels);
@@ -1778,7 +1839,7 @@ export class MatrixClient extends EventEmitter {
 
                         if (create) {
                             if (!create['content']) create['content'] = {};
-                            prevVersion = create['content']['room_version'] || "1";
+                            prevVersion = (create['content'] as CreateEventContent)['room_version'] || "1";
                         }
                     } catch (e) {
                         // state not available
@@ -1822,7 +1883,7 @@ export class MatrixClient extends EventEmitter {
                             createEventId = create['event_id'];
                         }
 
-                        newRoomVersion = create['content']['room_version'] || "1";
+                        newRoomVersion = (create['content'] as CreateEventContent)['room_version'] || "1";
                     }
                 } catch (e) {
                     // state not available
@@ -1909,7 +1970,7 @@ export class MatrixClient extends EventEmitter {
     @timedMatrixClientFunctionCall()
     public async getSpace(roomIdOrAlias: string): Promise<Space> {
         const roomId = await this.resolveRoom(roomIdOrAlias);
-        const createEvent = await this.getRoomStateEvent(roomId, "m.room.create", "");
+        const createEvent = await this.getRoomStateEventContent(roomId, "m.room.create", "");
         if (createEvent["type"] !== "m.space") {
             throw new Error("Room is not a space");
         }

@@ -86,7 +86,7 @@ export class PLManager {
         return this.powerLevels?.users_default ?? 0;
     }
 
-    private constructor(
+    constructor(
         private readonly createEvent: {
             sender: string;
             content: CreateEventContentHydra | CreateEventContentLegacy;

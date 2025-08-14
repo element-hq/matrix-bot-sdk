@@ -157,7 +157,7 @@ export class IdentityClient {
 
         const tryFetch = async (eventType: string, stateKey: string): Promise<any> => {
             try {
-                return await this.matrixClient.getRoomStateEvent(roomId, eventType, stateKey);
+                return await this.matrixClient.getRoomStateEventContent(roomId, eventType, stateKey);
             } catch (e) {
                 return null;
             }

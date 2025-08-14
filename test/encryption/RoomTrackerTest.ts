@@ -31,7 +31,7 @@ function prepareQueueSpies(
 
     client.cryptoStore.getRoom = readSpy;
     client.cryptoStore.storeRoom = storeSpy;
-    client.getRoomStateEvent = stateSpy;
+    client.getRoomStateEventContent = stateSpy;
 
     return [readSpy, stateSpy, storeSpy];
 }
@@ -141,7 +141,7 @@ describe('RoomTracker', () => {
             const { client } = createTestClient(null, "@user:example.org", cryptoStoreType);
 
             const [readSpy, stateSpy, storeSpy] = prepareQueueSpies(client, roomId, content);
-            client.getRoomStateEvent = async (rid: string, et: string, sk: string) => {
+            client.getRoomStateEventContent = async (rid: string, et: string, sk: string) => {
                 await stateSpy(rid, et, sk);
                 throw new Error("Simulated 404");
             };
