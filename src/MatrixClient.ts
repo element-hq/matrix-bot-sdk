@@ -953,12 +953,12 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public async getEvent(roomId: string, eventId: string): Promise<APIRoomEvent|EncryptedRoomEvent> {
+    public async getEvent(roomId: string, eventId: string): Promise<RoomEvent<unknown>> {
         const event = await this.getRawEvent(roomId, eventId);
         if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
             return this.processEvent((await this.crypto.decryptRoomEvent(new EncryptedRoomEvent(event), roomId)).raw);
         }
-        return event;
+        return new RoomEvent<unknown>(event);
     }
 
     /**
