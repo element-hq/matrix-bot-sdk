@@ -2605,13 +2605,12 @@ describe('MatrixClient', () => {
     });
 
     describe('getRoomStateEventContent', () => {
-        it('should call the right endpoint with no state key', async () => {
+        const event = { name: "My name" };
+        const eventType = "m.room.name";
+        const roomId = "!abc123:example.org";
+        const stateKey = "testing";
+        it('should call the right endpoint with an empty state key', async () => {
             const { client, http, hsUrl } = createTestClient();
-
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
@@ -2625,11 +2624,6 @@ describe('MatrixClient', () => {
         it('should call the right endpoint with a state key', async () => {
             const { client, http, hsUrl } = createTestClient();
 
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-            const stateKey = "testing";
-
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
@@ -2639,19 +2633,50 @@ describe('MatrixClient', () => {
             const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
         });
+    });
+
+    describe('getRoomStateEventBody', () => {
+        const eventType = "m.room.name";
+        const stateKey = "testing";
+        const roomId = "!abc123:example.org";
+        const event = { roomId, type: eventType, content: { name: "My name" }, state_key: stateKey };
+        it('should call the right endpoint with an empty state key', async () => {
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
+                return event;
+            });
+
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
+            expect(result).toMatchObject(event);
+        });
+
+        it('should call the right endpoint with a state key', async () => {
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
+
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
+                return event;
+            });
+
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
+            expect(result).toMatchObject(event);
+        });
 
         it('should process events with no state key', async () => {
-            const { client, http, hsUrl } = createTestClient();
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
 
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
             const processor = <IPreprocessor>{
                 processEvent: (ev, procClient, kind?) => {
                     expect(kind).toEqual(EventKind.RoomEvent);
                     ev["processed"] = true;
                 },
-                getSupportedEventTypes: () => ["m.room.message"],
+                getSupportedEventTypes: () => [eventType],
             };
 
             client.addPreprocessor(processor);
@@ -2662,39 +2687,25 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, ""), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
             expect(result["processed"]).toBeTruthy();
         });
 
-        it('should process events with a state key', async () => {
-            const { client, http, hsUrl } = createTestClient();
-
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-            const stateKey = "testing";
-            const processor = <IPreprocessor>{
-                processEvent: (ev, procClient, kind?) => {
-                    expect(kind).toEqual(EventKind.RoomEvent);
-                    ev["processed"] = true;
-                },
-                getSupportedEventTypes: () => ["m.room.message"],
-            };
-
-            client.addPreprocessor(processor);
+        it('should call the fallback endpoint with a state key', async () => {
+            const { client, http } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: []} satisfies ServerVersions);
 
             // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
-                return event;
+            http.when("GET", `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`).respond(200, () => {
+                return [event];
             });
 
-            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
-            expect(result["processed"]).toBeTruthy();
         });
     });
+
 
     describe('getEventContext', () => {
         it('should use the right endpoint', async () => {

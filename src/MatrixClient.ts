@@ -50,6 +50,7 @@ import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
 import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
+import { Json } from "./helpers/Types";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
@@ -1029,8 +1030,8 @@ export class MatrixClient extends EventEmitter {
             + encodeURIComponent(roomId) + "/state/"
             + encodeURIComponent(type) + "/"
             + encodeURIComponent(stateKey);
-        const data = await this.doRequest("GET", path, { format: "content" });
-        return this.processEvent(data);
+        const data = await this.doRequest("GET", path);
+        return data;
     }
 
     /**
@@ -1609,7 +1610,7 @@ export class MatrixClient extends EventEmitter {
         // Trivial object traversal with '.' seperator.
         action.split('.').forEach(k => (investigate = investigate?.[k]));
         // Only accept numbers that are valid power levels.
-        if (Number.isFinite(investigated)) {
+        if (typeof investigate === "number" && Number.isFinite(investigate)) {
             requiredPower = investigate;
         }
 
