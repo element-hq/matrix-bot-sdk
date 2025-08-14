@@ -1028,7 +1028,7 @@ export class MatrixClient extends EventEmitter {
         const path = "/_matrix/client/v3/rooms/"
             + encodeURIComponent(roomId) + "/state/"
             + encodeURIComponent(type) + "/"
-            + encodeURIComponent(stateKey ? stateKey : '');
+            + encodeURIComponent(stateKey);
         const data = await this.doRequest("GET", path, { format: "content" });
         return this.processEvent(data);
     }
@@ -1048,7 +1048,7 @@ export class MatrixClient extends EventEmitter {
             const path = "/_matrix/client/v3/rooms/"
                 + encodeURIComponent(roomId) + "/state/"
                 + encodeURIComponent(type) + "/"
-                + encodeURIComponent(stateKey ? stateKey : '');
+                + encodeURIComponent(stateKey);
             const data = await this.doRequest("GET", path, { format: "event" });
             return this.processEvent(data);
         }
@@ -1605,13 +1605,12 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        const investigate = pls.currentPL;
-        let investigated: number | Record<string, number>;
+        let investigate = pls.currentPL as Json;
         // Trivial object traversal with '.' seperator.
-        action.split('.').forEach(k => (investigated = investigate?.[k]));
+        action.split('.').forEach(k => (investigate = investigate?.[k]));
         // Only accept numbers that are valid power levels.
-        if (typeof investigated === "number" && Number.isFinite(investigated)) {
-            requiredPower = investigated;
+        if (Number.isFinite(investigated)) {
+            requiredPower = investigate;
         }
 
         return pls.getUserPowerLevel(userId) >= requiredPower;
