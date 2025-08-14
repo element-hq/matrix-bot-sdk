@@ -2642,7 +2642,7 @@ describe('MatrixClient', () => {
         const event = { roomId, type: eventType, content: { name: "My name" }, state_key: stateKey };
         it('should call the right endpoint with an empty state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
@@ -2655,7 +2655,7 @@ describe('MatrixClient', () => {
 
         it('should call the right endpoint with a state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
@@ -2669,7 +2669,7 @@ describe('MatrixClient', () => {
 
         it('should process events with no state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"]} satisfies ServerVersions);
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
             const processor = <IPreprocessor>{
                 processEvent: (ev, procClient, kind?) => {
@@ -2694,7 +2694,7 @@ describe('MatrixClient', () => {
 
         it('should call the fallback endpoint with a state key', async () => {
             const { client, http } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: []} satisfies ServerVersions);
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: [] } satisfies ServerVersions);
 
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`).respond(200, () => {
@@ -2705,7 +2705,6 @@ describe('MatrixClient', () => {
             expect(result).toMatchObject(event);
         });
     });
-
 
     describe('getEventContext', () => {
         it('should use the right endpoint', async () => {
