@@ -2366,7 +2366,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
-            expect(result["processed"]).toBeTruthy();
+            expect(result.raw["processed"]).toBeTruthy();
         });
 
         it('should try decryption', () => testCryptoStores(async (cryptoStoreType) => {

@@ -50,7 +50,7 @@ import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
 import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
-import { Json } from "./helpers/Types";
+import { IJsonType, Json } from "./helpers/Types";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
@@ -953,12 +953,12 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public async getEvent(roomId: string, eventId: string): Promise<APIRoomEvent|EncryptedRoomEvent> {
+    public async getEvent(roomId: string, eventId: string): Promise<RoomEvent<IJsonType>> {
         const event = await this.getRawEvent(roomId, eventId);
         if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
             return this.processEvent((await this.crypto.decryptRoomEvent(new EncryptedRoomEvent(event), roomId)).raw);
         }
-        return event;
+        return new RoomEvent<IJsonType>(event);
     }
 
     /**
