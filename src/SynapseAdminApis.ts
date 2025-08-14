@@ -54,7 +54,7 @@ export interface SynapseUserProperties extends SynapseUser {
     password?: string;
 
     /**
-     * If set to false, devices aren't logged out even when a password is provided.
+     * If false, devices aren't logged out even when {@link password} is provided.
      */
     logout_devices?: boolean;
 }
