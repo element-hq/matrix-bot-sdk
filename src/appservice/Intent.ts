@@ -311,6 +311,7 @@ export class Intent {
                     type: "m.login.application_service",
                     username: this.userId.substring(1).split(":")[0],
                     device_id: deviceId,
+                    inhibit_login: true,
                 });
 
                 // HACK: Workaround for unit tests
