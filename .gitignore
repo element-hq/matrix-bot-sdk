@@ -63,3 +63,7 @@ typings/
 
 # jsdoc files
 .jsdoc
+
+/.direnv
+/.devenv
+/.devenv.flake.nix
