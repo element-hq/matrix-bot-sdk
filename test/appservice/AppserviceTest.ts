@@ -45,9 +45,226 @@ async function beginAppserviceWithProtocols(protocols: string[]) {
 }
 
 describe('Appservice', () => {
-    it('should throw when there are no registered namespaces', async () => {
-        try {
-            new Appservice({
+    it('should NOT throw when there are no registered namespaces', async () => {
+        new Appservice({
+            port: 0,
+            bindAddress: '',
+            homeserverName: 'localhost',
+            homeserverUrl: 'https://localhost',
+            registration: {
+                as_token: "",
+                hs_token: "",
+                sender_localpart: "",
+                namespaces: {
+                },
+                url: null,
+            },
+        });
+    });
+
+    describe('user namespace', () => {
+        it('should allow multiple registered user namespaces but fail suffix functions', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [
+                            { exclusive: true, regex: "@abc_.+:.+" },
+                            { exclusive: true, regex: "@def_.+:.+" },
+                        ],
+                    },
+                    url: null,
+                },
+            });
+            expect(() => appservice.getUserIdForSuffix("test")).toThrow('Cannot use getUserIdForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getIntentForSuffix("test")).toThrow('Cannot use getUserIdForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getSuffixForUserId("test")).toThrow('Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
+        });
+
+        it('should allow multiple registered user namespaces if prefix provided', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                userPrefix: "@botusers_",
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [
+                            { exclusive: true, regex: "@botusers_.+:.+" },
+                            { exclusive: true, regex: "@unrelated_.+:.+" },
+                        ],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getUserIdForSuffix("test")).toEqual('@botusers_test:localhost');
+            expect(appservice.getIntentForSuffix("test")).toHaveProperty('userId', '@botusers_test:localhost');
+            expect(appservice.getSuffixForUserId("@botusers_test:localhost")).toEqual('test');
+        });
+
+        it('should accept a ".+" prefix in the user namespace', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [{ exclusive: true, regex: "@prefix_.+:localhost" }],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
+        });
+
+        it('should accept a ".*" prefix in the user namespace', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [{ exclusive: true, regex: "@prefix_.*:localhost" }],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
+        });
+
+        it('should allow disabling the user suffix check', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [{ exclusive: true, regex: "@prefix_foo:localhost" }],
+                    },
+                    url: null,
+                },
+            });
+            expect(() => appservice.getUserIdForSuffix('foo')).toThrow("Cannot use getUserIdForSuffix, provided user namespace did not contain exactly one valid namespace");
+            expect(() => appservice.getSuffixForUserId('foo')).toThrow("Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace");
+            expect(appservice.isNamespacedUser('@prefix_foo:localhost')).toEqual(true);
+        });
+    });
+
+    describe.only('alias namespace', () => {
+        it('should allow multiple registered user namespaces but fail suffix functions', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        aliases: [
+                            { exclusive: true, regex: "#foo_.+:.+" },
+                            { exclusive: true, regex: "#bar_.+:.+" },
+                        ],
+                    },
+                    url: null,
+                },
+            });
+            expect(() => appservice.getAliasForSuffix("test")).toThrow(
+                'Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow(
+                'Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getSuffixForAlias("test")).toThrow(
+                'Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
+        });
+
+        it('should allow multiple registered user namespaces if prefix provided', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                aliasPrefix: "#myrooms_",
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        aliases: [
+                            { exclusive: true, regex: "#myrooms_.+:.+" },
+                            { exclusive: true, regex: "#unrelated_.+:.+" },
+                        ],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getAliasForSuffix("test")).toEqual('#myrooms_test:localhost');
+            expect(appservice.getAliasLocalpartForSuffix("test")).toEqual("myrooms_test");
+            expect(appservice.getSuffixForAlias("#myrooms_test:localhost")).toEqual("test");
+        });
+
+        it('should accept a ".+" prefix in the alias namespace', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        aliases: [{ exclusive: true, regex: "#prefix_.+:localhost" }],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getAliasForSuffix('foo')).toEqual("#prefix_foo:localhost");
+        });
+
+        it('should accept a ".*" prefix in the alias namespace', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        aliases: [{ exclusive: true, regex: "#prefix_.*:localhost" }],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getAliasForSuffix('foo')).toEqual("#prefix_foo:localhost");
+        });
+
+        it('should allow disabling the alias suffix check', async () => {
+            const appservice = new Appservice({
                 port: 0,
                 bindAddress: '',
                 homeserverName: 'localhost',
@@ -64,107 +281,13 @@ describe('Appservice', () => {
                     url: null,
                 },
             });
-
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Did not throw when expecting it");
-        } catch (e) {
-            expect(e.message).toEqual("No user namespaces in registration");
-        }
-    });
-
-    it('should throw when there are too many registered namespaces', async () => {
-        try {
-            new Appservice({
-                port: 0,
-                bindAddress: '',
-                homeserverName: 'localhost',
-                homeserverUrl: 'https://localhost',
-                registration: {
-                    as_token: "",
-                    hs_token: "",
-                    sender_localpart: "",
-                    namespaces: {
-                        users: [
-                            { exclusive: true, regex: "@.+:.+" },
-                            { exclusive: true, regex: "@.+:.+" },
-                        ],
-                        rooms: [],
-                        aliases: [],
-                    },
-                    url: null,
-                },
-            });
-
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Did not throw when expecting it");
-        } catch (e) {
-            expect(e.message).toEqual("Too many user namespaces registered: expecting exactly one");
-        }
-    });
-
-    it('should accept a ".+" prefix namespace', async () => {
-        const appservice = new Appservice({
-            port: 0,
-            bindAddress: '',
-            homeserverName: 'localhost',
-            homeserverUrl: 'https://localhost',
-            registration: {
-                as_token: "",
-                hs_token: "",
-                sender_localpart: "",
-                namespaces: {
-                    users: [{ exclusive: true, regex: "@prefix_.+:localhost" }],
-                    rooms: [],
-                    aliases: [],
-                },
-                url: null,
-            },
+            expect(() => appservice.getAliasForSuffix("test")).toThrow(
+                'Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow(
+                'Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getSuffixForAlias("test")).toThrow(
+                'Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
         });
-        expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
-    });
-
-    it('should accept a ".*" prefix namespace', async () => {
-        const appservice = new Appservice({
-            port: 0,
-            bindAddress: '',
-            homeserverName: 'localhost',
-            homeserverUrl: 'https://localhost',
-            registration: {
-                as_token: "",
-                hs_token: "",
-                sender_localpart: "",
-                namespaces: {
-                    users: [{ exclusive: true, regex: "@prefix_.*:localhost" }],
-                    rooms: [],
-                    aliases: [],
-                },
-                url: null,
-            },
-        });
-        expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
-    });
-
-    it('should allow disabling the suffix check', async () => {
-        const appservice = new Appservice({
-            port: 0,
-            bindAddress: '',
-            homeserverName: 'localhost',
-            homeserverUrl: 'https://localhost',
-            registration: {
-                as_token: "",
-                hs_token: "",
-                sender_localpart: "",
-                namespaces: {
-                    users: [{ exclusive: true, regex: "@prefix_foo:localhost" }],
-                    rooms: [],
-                    aliases: [],
-                },
-                url: null,
-            },
-        });
-        expect(() => appservice.getUserIdForSuffix('foo')).toThrowError("Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix");
-        expect(() => appservice.getSuffixForUserId('foo')).toThrowError("Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix");
-        expect(appservice.isNamespacedUser('@prefix_foo:localhost')).toEqual(true);
     });
 
     it('should return the right bot user ID', async () => {
@@ -542,37 +665,6 @@ describe('Appservice', () => {
     });
 
     describe('isNamespacedAlias', () => {
-        it('should throw on no alias prefix set', async () => {
-            try {
-                const appservice = new Appservice({
-                    port: 0,
-                    bindAddress: '',
-                    homeserverName: 'example.org',
-                    homeserverUrl: 'https://localhost',
-                    registration: {
-                        as_token: "",
-                        hs_token: "",
-                        sender_localpart: "_bot_",
-                        namespaces: {
-                            users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                            rooms: [],
-                            aliases: [],
-                        },
-                        url: null,
-                    },
-                });
-
-                const userA = "#_prefix_test:example.org";
-                const userB = "#alice_prefix_:example.org";
-
-                expect(appservice.isNamespacedAlias(userA)).toBeTruthy();
-                expect(appservice.isNamespacedAlias(userB)).toBeFalsy();
-                throw new Error("Did not throw when expecting it");
-            } catch (e) {
-                expect(e.message).toEqual("Invalid configured alias prefix");
-            }
-        });
-
         it('should be able to tell if a given alias is the prefix namespace', async () => {
             const appservice = new Appservice({
                 port: 0,
@@ -584,19 +676,21 @@ describe('Appservice', () => {
                     hs_token: "",
                     sender_localpart: "_bot_",
                     namespaces: {
-                        users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
+                        users: [],
                         rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
+                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }, { exclusive: true, regex: "#_prefix2_.*:.+" }],
                     },
                     url: null,
                 },
             });
 
-            const userA = "#_prefix_test:example.org";
-            const userB = "#alice_prefix_:example.org";
+            const aliasA = "#_prefix_test:example.org";
+            const aliasB = "#alice_prefix_:example.org";
+            const aliasC = "#alice_prefix2_:example.org";
 
-            expect(appservice.isNamespacedAlias(userA)).toBeTruthy();
-            expect(appservice.isNamespacedAlias(userB)).toBeFalsy();
+            expect(appservice.isNamespacedAlias(aliasA)).toBeTruthy();
+            expect(appservice.isNamespacedAlias(aliasB)).toBeFalsy();
+            expect(appservice.isNamespacedAlias(aliasC)).toBeTruthy();
         });
     });
 
@@ -620,193 +714,6 @@ describe('Appservice', () => {
         });
 
         expect(appservice.getAlias("_prefix_testing")).toEqual("#_prefix_testing:example.org");
-    });
-
-    describe('getAliasForSuffix', () => {
-        it('should throw on no alias prefix set', async () => {
-            try {
-                const appservice = new Appservice({
-                    port: 0,
-                    bindAddress: '',
-                    homeserverName: 'example.org',
-                    homeserverUrl: 'https://localhost',
-                    registration: {
-                        as_token: "",
-                        hs_token: "",
-                        sender_localpart: "_bot_",
-                        namespaces: {
-                            users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                            rooms: [],
-                            aliases: [],
-                        },
-                        url: null,
-                    },
-                });
-
-                expect(appservice.getAliasForSuffix("testing")).toEqual("#_prefix_testing:example.org");
-                throw new Error("Did not throw when expecting it");
-            } catch (e) {
-                expect(e.message).toEqual("Invalid configured alias prefix");
-            }
-        });
-
-        it('should return an alias for any namespaced suffix', async () => {
-            const appservice = new Appservice({
-                port: 0,
-                bindAddress: '',
-                homeserverName: 'example.org',
-                homeserverUrl: 'https://localhost',
-                registration: {
-                    as_token: "",
-                    hs_token: "",
-                    sender_localpart: "_bot_",
-                    namespaces: {
-                        users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                        rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
-                    },
-                    url: null,
-                },
-            });
-
-            expect(appservice.getAliasForSuffix("testing")).toEqual("#_prefix_testing:example.org");
-        });
-    });
-
-    describe('getAliasLocalpartForSuffix', () => {
-        it('should throw on no alias prefix set', async () => {
-            try {
-                const appservice = new Appservice({
-                    port: 0,
-                    bindAddress: '',
-                    homeserverName: 'example.org',
-                    homeserverUrl: 'https://localhost',
-                    registration: {
-                        as_token: "",
-                        hs_token: "",
-                        sender_localpart: "_bot_",
-                        namespaces: {
-                            users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                            rooms: [],
-                            aliases: [],
-                        },
-                        url: null,
-                    },
-                });
-
-                expect(appservice.getAliasLocalpartForSuffix("testing")).toEqual("_prefix_testing");
-                throw new Error("Did not throw when expecting it");
-            } catch (e) {
-                expect(e.message).toEqual("Invalid configured alias prefix");
-            }
-        });
-
-        it('should return an alias localpart for any namespaced suffix', async () => {
-            const appservice = new Appservice({
-                port: 0,
-                bindAddress: '',
-                homeserverName: 'example.org',
-                homeserverUrl: 'https://localhost',
-                registration: {
-                    as_token: "",
-                    hs_token: "",
-                    sender_localpart: "_bot_",
-                    namespaces: {
-                        users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                        rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
-                    },
-                    url: null,
-                },
-            });
-
-            expect(appservice.getAliasLocalpartForSuffix("testing")).toEqual("_prefix_testing");
-        });
-    });
-
-    describe('getSuffixForAlias', () => {
-        it('should throw on no alias prefix set', async () => {
-            try {
-                const appservice = new Appservice({
-                    port: 0,
-                    bindAddress: '',
-                    homeserverName: 'example.org',
-                    homeserverUrl: 'https://localhost',
-                    registration: {
-                        as_token: "",
-                        hs_token: "",
-                        sender_localpart: "_bot_",
-                        namespaces: {
-                            users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                            rooms: [],
-                            aliases: [],
-                        },
-                        url: null,
-                    },
-                });
-
-                const suffix = "testing";
-                const userId = `#_prefix_${suffix}:example.org`;
-
-                expect(appservice.getSuffixForAlias(userId)).toBe(suffix);
-                throw new Error("Did not throw when expecting it");
-            } catch (e) {
-                expect(e.message).toEqual("Invalid configured alias prefix");
-            }
-        });
-
-        it('should return a suffix for any namespaced alias', async () => {
-            const appservice = new Appservice({
-                port: 0,
-                bindAddress: '',
-                homeserverName: 'example.org',
-                homeserverUrl: 'https://localhost',
-                registration: {
-                    as_token: "",
-                    hs_token: "",
-                    sender_localpart: "_bot_",
-                    namespaces: {
-                        users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                        rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
-                    },
-                    url: null,
-                },
-            });
-
-            const suffix = "testing";
-            const userId = `#_prefix_${suffix}:example.org`;
-
-            expect(appservice.getSuffixForAlias(userId)).toBe(suffix);
-        });
-
-        it('should return a falsey suffix for any non-namespaced alias', async () => {
-            const appservice = new Appservice({
-                port: 0,
-                bindAddress: '',
-                homeserverName: 'example.org',
-                homeserverUrl: 'https://localhost',
-                registration: {
-                    as_token: "",
-                    hs_token: "",
-                    sender_localpart: "_bot_",
-                    namespaces: {
-                        users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
-                        rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }],
-                    },
-                    url: null,
-                },
-            });
-
-            expect(appservice.getSuffixForAlias(null)).toBeFalsy();
-            expect(appservice.getSuffixForAlias(undefined)).toBeFalsy();
-            expect(appservice.getSuffixForAlias("")).toBeFalsy();
-            expect(appservice.getSuffixForAlias("#invalid")).toBeFalsy();
-            expect(appservice.getSuffixForAlias("#_prefix_invalid")).toBeFalsy();
-            expect(appservice.getSuffixForAlias("#_prefix_testing:invalid.example.org")).toBeFalsy();
-            expect(appservice.getSuffixForAlias("#_invalid_testing:example.org")).toBeFalsy();
-        });
     });
 
     it('should return 404 error codes for unknown endpoints', async () => {

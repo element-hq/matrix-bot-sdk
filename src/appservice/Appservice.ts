@@ -73,7 +73,7 @@ export interface IAppserviceRegistration {
         /**
          * The user namespaces the application service is requesting.
          */
-        users: {
+        users?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace. This
              * means that no other user on the homeserver may register users that match this namespace.
@@ -89,7 +89,7 @@ export interface IAppserviceRegistration {
         /**
          * The room namespaces the application service is requesting. This is not for alises.
          */
-        rooms: {
+        rooms?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace.
              */
@@ -104,7 +104,7 @@ export interface IAppserviceRegistration {
         /**
          * The room alias namespaces the application service is requesting.
          */
-        aliases: {
+        aliases?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace. This means
              * that no other user on the homeserver may register aliases that match this namespace.
@@ -184,6 +184,16 @@ export interface IAppserviceOptions {
      * The join strategy to use for all intents, if any.
      */
     joinStrategy?: IJoinRoomStrategy;
+
+    /**
+     * If provided, use this as the user prefix rather than calculating from the namespace.
+     */
+    userPrefix?: string;
+
+    /**
+     * If provided, use this as the alias prefix rather than calculating from the namespace.
+     */
+    aliasPrefix?: string;
 
     /**
      * Options for how Intents are handled.
@@ -321,33 +331,22 @@ export class Appservice extends EventEmitter {
         this.app.post("/_matrix/app/v1/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
         this.app.post("/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
         this.app.post("/_matrix/app/v1/ping", this.onPing.bind(this));
-
         // We register the 404 handler in the `begin()` function to allow consumers to add their own endpoints.
 
-        if (!this.registration.namespaces || !this.registration.namespaces.users || this.registration.namespaces.users.length === 0) {
-            throw new Error("No user namespaces in registration");
-        }
-        if (this.registration.namespaces.users.length !== 1) {
-            throw new Error("Too many user namespaces registered: expecting exactly one");
-        }
-
-        const userPrefix = (this.registration.namespaces.users[0].regex || "").split(":")[0];
-        if (!userPrefix.endsWith(".*") && !userPrefix.endsWith(".+")) {
-            this.userPrefix = null;
-        } else {
-            this.userPrefix = userPrefix.substring(0, userPrefix.length - 2); // trim off the .* part
-        }
-
-        if (!this.registration.namespaces?.aliases || this.registration.namespaces.aliases.length !== 1) {
-            this.aliasPrefix = null;
-        } else {
-            this.aliasPrefix = (this.registration.namespaces.aliases[0].regex || "").split(":")[0];
-            if (!this.aliasPrefix.endsWith(".*") && !this.aliasPrefix.endsWith(".+")) {
-                this.aliasPrefix = null;
-            } else {
-                this.aliasPrefix = this.aliasPrefix.substring(0, this.aliasPrefix.length - 2); // trim off the .* part
+        function getPrefix(namespace: {regex: string}[]|undefined): string|null {
+            const prefix = namespace?.length === 1 && (namespace[0].regex || "").split(":")[0];
+            if (!prefix) {
+                return null;
             }
+            if (prefix.endsWith(".*") || prefix.endsWith(".+")) {
+                return prefix.slice(0, -2);
+            }
+            return null;
         }
+
+        // Only register a prefix if we register one namespace.
+        this.userPrefix = options.userPrefix !== undefined ? options.userPrefix : getPrefix(this.registration.namespaces.users);
+        this.aliasPrefix = options.aliasPrefix !== undefined ? options.aliasPrefix : getPrefix(this.registration.namespaces.aliases);
     }
 
     /**
@@ -444,6 +443,7 @@ export class Appservice extends EventEmitter {
     /**
      * Gets an Intent for a given user suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The user's suffix
      * @returns {Intent} An Intent for the user.
      */
@@ -454,12 +454,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets a full user ID for a given suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The user's suffix
      * @returns {string} The user's ID.
      */
     public getUserIdForSuffix(suffix: string): string {
         if (!this.userPrefix) {
-            throw new Error(`Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix`);
+            throw new Error(`Cannot use getUserIdForSuffix, provided user namespace did not contain exactly one valid namespace`);
         }
         return `${this.userPrefix}${suffix}:${this.options.homeserverName}`;
     }
@@ -488,12 +489,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets the suffix for the provided user ID. If the user ID is not a namespaced
      * user, this will return a falsey value.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param {string} userId The user ID to parse
      * @returns {string} The suffix from the user ID.
      */
     public getSuffixForUserId(userId: string): string {
         if (!this.userPrefix) {
-            throw new Error(`Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix`);
+            throw new Error(`Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace`);
         }
         if (!userId || !userId.startsWith(this.userPrefix) || !userId.endsWith(`:${this.options.homeserverName}`)) {
             // Invalid ID
@@ -516,7 +518,7 @@ export class Appservice extends EventEmitter {
      */
     public isNamespacedUser(userId: string): boolean {
         return userId === this.botUserId ||
-            !!this.registration.namespaces?.users.find(({ regex }) =>
+            !!this.registration.namespaces.users?.find(({ regex }) =>
                 new RegExp(regex).test(userId),
             );
     }
@@ -534,12 +536,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets a full alias for a given suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The alias's suffix
      * @returns {string} The alias.
      */
     public getAliasForSuffix(suffix: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace");
         }
         return `${this.aliasPrefix}${suffix}:${this.options.homeserverName}`;
     }
@@ -547,25 +550,27 @@ export class Appservice extends EventEmitter {
     /**
      * Gets the localpart of an alias for a given suffix. The prefix is automatically detected from the registration
      * options. Useful for the createRoom endpoint.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The alias's suffix
      * @returns {string} The alias localpart.
      */
     public getAliasLocalpartForSuffix(suffix: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace");
         }
-        return `${this.aliasPrefix.substr(1)}${suffix}`;
+        return `${this.aliasPrefix.slice(1)}${suffix}`;
     }
 
     /**
      * Gets the suffix for the provided alias. If the alias is not a namespaced
      * alias, this will return a falsey value.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param {string} alias The alias to parse
      * @returns {string} The suffix from the alias.
      */
     public getSuffixForAlias(alias: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace");
         }
         if (!alias || !this.isNamespacedAlias(alias)) {
             // Invalid ID
@@ -587,10 +592,9 @@ export class Appservice extends EventEmitter {
      * @returns {boolean} true if the alias is namespaced, false otherwise
      */
     public isNamespacedAlias(alias: string): boolean {
-        if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
-        }
-        return alias.startsWith(this.aliasPrefix) && alias.endsWith(":" + this.options.homeserverName);
+        return !!this.registration.namespaces.aliases?.find(({ regex }) =>
+            new RegExp(regex).test(alias),
+        );
     }
 
     /**
