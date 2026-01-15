@@ -107,9 +107,9 @@ describe('Appservice', () => {
                     url: null,
                 },
             });
-            expect(appservice.getUserIdForSuffix("test")).toEqual('@botusers_test:localhost')
-            expect(appservice.getIntentForSuffix("test")).toHaveProperty('userId', '@botusers_test:localhost')
-            expect(appservice.getSuffixForUserId("@botusers_test:localhost")).toEqual('test')
+            expect(appservice.getUserIdForSuffix("test")).toEqual('@botusers_test:localhost');
+            expect(appservice.getIntentForSuffix("test")).toHaveProperty('userId', '@botusers_test:localhost');
+            expect(appservice.getSuffixForUserId("@botusers_test:localhost")).toEqual('test');
         });
 
         it('should accept a ".+" prefix in the user namespace', async () => {
@@ -170,7 +170,7 @@ describe('Appservice', () => {
             expect(() => appservice.getSuffixForUserId('foo')).toThrow("Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace");
             expect(appservice.isNamespacedUser('@prefix_foo:localhost')).toEqual(true);
         });
-    })
+    });
 
     describe.only('alias namespace', () => {
         it('should allow multiple registered user namespaces but fail suffix functions', async () => {
@@ -192,9 +192,12 @@ describe('Appservice', () => {
                     url: null,
                 },
             });
-            expect(() => appservice.getAliasForSuffix("test")).toThrow('Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
-            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow('Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
-            expect(() => appservice.getSuffixForAlias("test")).toThrow('Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasForSuffix("test")).toThrow(
+                'Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow(
+                'Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getSuffixForAlias("test")).toThrow(
+                'Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
         });
 
         it('should allow multiple registered user namespaces if prefix provided', async () => {
@@ -217,7 +220,7 @@ describe('Appservice', () => {
                     url: null,
                 },
             });
-            expect(appservice.getAliasForSuffix("test")).toEqual('#myrooms_test:localhost')
+            expect(appservice.getAliasForSuffix("test")).toEqual('#myrooms_test:localhost');
             expect(appservice.getAliasLocalpartForSuffix("test")).toEqual("myrooms_test");
             expect(appservice.getSuffixForAlias("#myrooms_test:localhost")).toEqual("test");
         });
@@ -278,12 +281,14 @@ describe('Appservice', () => {
                     url: null,
                 },
             });
-            expect(() => appservice.getAliasForSuffix("test")).toThrow('Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
-            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow('Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
-            expect(() => appservice.getSuffixForAlias("test")).toThrow('Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasForSuffix("test")).toThrow(
+                'Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getAliasLocalpartForSuffix("test")).toThrow(
+                'Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace');
+            expect(() => appservice.getSuffixForAlias("test")).toThrow(
+                'Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
         });
-    })
-
+    });
 
     it('should return the right bot user ID', async () => {
         const appservice = new Appservice({
@@ -673,7 +678,7 @@ describe('Appservice', () => {
                     namespaces: {
                         users: [],
                         rooms: [],
-                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" },{ exclusive: true, regex: "#_prefix2_.*:.+" }],
+                        aliases: [{ exclusive: true, regex: "#_prefix_.*:.+" }, { exclusive: true, regex: "#_prefix2_.*:.+" }],
                     },
                     url: null,
                 },
