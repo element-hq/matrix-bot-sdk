@@ -1,4 +1,4 @@
-import * as getPort from "get-port";
+import getPort from "get-port";
 import * as requestPromise from "request-promise";
 import * as simple from "simple-mock";
 import HttpBackend from 'matrix-mock-request';

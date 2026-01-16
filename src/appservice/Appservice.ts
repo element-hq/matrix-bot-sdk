@@ -950,6 +950,11 @@ export class Appservice extends EventEmitter {
 
         const { txnId } = req.params;
 
+        if (typeof txnId !== "string") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "txnId must be a string" });
+            return;
+        }
+
         if (this.pendingTransactions.has(txnId)) {
             // The homeserver has retried a transaction while we're still handling it.
             try {
@@ -991,6 +996,11 @@ export class Appservice extends EventEmitter {
         }
 
         const userId = req.params["userId"];
+        if (typeof userId !== "string") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "userId must be a string" });
+            return;
+        }
+
         this.emit("query.user", userId, async (result) => {
             if (result.then) result = await result;
             if (result === false) {
@@ -1012,6 +1022,10 @@ export class Appservice extends EventEmitter {
         }
 
         const roomAlias = req.params["roomAlias"];
+        if (typeof roomAlias !== "string") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "roomAlias must be a string" });
+            return;
+        }
         this.emit("query.room", roomAlias, async (result) => {
             if (result.then) result = await result;
             if (result === false) {
@@ -1105,6 +1119,11 @@ export class Appservice extends EventEmitter {
         }
 
         const protocol = req.params["protocol"];
+        if (typeof protocol !== "string") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "protocol must be a string" });
+            return;
+        }
+
         if (!this.registration.protocols.includes(protocol)) {
             res.status(404).json({
                 errcode: "PROTOCOL_NOT_HANDLED",
@@ -1124,6 +1143,11 @@ export class Appservice extends EventEmitter {
         }
 
         const protocol = req.params["protocol"];
+        if (typeof protocol !== "string") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "protocol must be a string" });
+            return;
+        }
+
         const responseFunc = (items: any[]) => {
             if (items && items.length > 0) {
                 res.status(200).json(items);
