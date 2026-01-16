@@ -7,7 +7,7 @@ import {
     encodeUnpaddedUrlSafeBase64,
 } from "../src";
 
-function sb(s: string): ArrayBuffer {
+function sb(s: string): Buffer {
     return Buffer.from(s);
 }
 

@@ -4,11 +4,11 @@ import {
     UserID,
 } from "..";
 
-const CREATOR_ROOM_VERSIONS = ["12", "org.matrix.hydra.11"];
+const LEGACY_PLS_ROOM_VERSIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
 
 interface CreateEventContentHydra {
     additional_creators?: string[];
-    room_version: "12" | "org.matrix.hydra.11";
+    room_version: string;
 }
 
 interface CreateEventContentLegacy {
@@ -58,13 +58,12 @@ export class PLManager {
     public readonly creators: Set<string>;
 
     public static areCreatorsPriviledged(roomVersion: string): boolean {
-        return CREATOR_ROOM_VERSIONS.includes(roomVersion);
+        return !LEGACY_PLS_ROOM_VERSIONS.includes(roomVersion);
     }
 
     public get areCreatorsPriviledged(): boolean {
         return (
-            !!this.createEvent.content.room_version &&
-            CREATOR_ROOM_VERSIONS.includes(
+            !LEGACY_PLS_ROOM_VERSIONS.includes(
                 this.createEvent.content.room_version,
             )
         );

@@ -1,31 +1,31 @@
 /**
  * Encodes Base64.
  * @category Utilities
- * @param {ArrayBuffer | Uint8Array} b The buffer to encode.
- * @returns {string} The Base64 string.
+ * @param b The buffer to encode.
+ * @returns The Base64 string.
  */
-export function encodeBase64(b: ArrayBuffer | Uint8Array): string {
-    return Buffer.from(b).toString('base64');
+export function encodeBase64(...params: Parameters<typeof Buffer["from"]>): string {
+    return Buffer.from(...params).toString('base64');
 }
 
 /**
  * Encodes Unpadded Base64.
  * @category Utilities
- * @param {ArrayBuffer | Uint8Array} b The buffer to encode.
- * @returns {string} The Base64 string.
+ * @param b The buffer to encode.
+ * @returns The Base64 string.
  */
-export function encodeUnpaddedBase64(b: ArrayBuffer | Uint8Array): string {
-    return encodeBase64(b).replace(/=+/g, '');
+export function encodeUnpaddedBase64(...params: Parameters<typeof Buffer["from"]>): string {
+    return encodeBase64(...params).replace(/=+/g, '');
 }
 
 /**
  * Encodes URL-Safe Unpadded Base64.
  * @category Utilities
- * @param {ArrayBuffer | Uint8Array} b The buffer to encode.
- * @returns {string} The Base64 string.
+ * @param b The buffer to encode.
+ * @returns The Base64 string.
  */
-export function encodeUnpaddedUrlSafeBase64(b: ArrayBuffer | Uint8Array): string {
-    return encodeUnpaddedBase64(b).replace(/\+/g, '-').replace(/\//g, '_');
+export function encodeUnpaddedUrlSafeBase64(...params: Parameters<typeof Buffer["from"]>): string {
+    return encodeUnpaddedBase64(...params).replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 /**
