@@ -5,7 +5,7 @@ for REMOTE in $(git remote); do
     URL=$(git remote get-url $REMOTE)
     if [[ $URL =~ "turt2live" ]]; then
         UPSTREAM_REPO=$REMOTE
-    elif [[ $URL =~ "vector-im" ]]; then
+    elif [[ $URL =~ "element-hq" ]]; then
         FORK_REPO=$REMOTE
     fi
 done
@@ -23,8 +23,8 @@ fi
 
 if [[ -z $FORK_REPO ]]; then
     echo -n 'Adding remote for fork repo: '
-    FORK_REPO=vector-im
-    echoAndDo git remote add $FORK_REPO git@github.com:vector-im/matrix-bot-sdk.git
+    FORK_REPO=element-hq
+    echoAndDo git remote add $FORK_REPO git@github.com:element-hq/matrix-bot-sdk.git
 fi
 
 for REPO in $UPSTREAM_REPO $FORK_REPO; do
