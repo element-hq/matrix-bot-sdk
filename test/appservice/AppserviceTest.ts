@@ -288,6 +288,27 @@ describe('Appservice', () => {
             expect(() => appservice.getSuffixForAlias("test")).toThrow(
                 'Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace');
         });
+
+        it('should accept a ".*" prefix namespace', async () => {
+            const appservice = new Appservice({
+                port: 0,
+                bindAddress: '',
+                homeserverName: 'localhost',
+                homeserverUrl: 'https://localhost',
+                registration: {
+                    as_token: "",
+                    hs_token: "",
+                    sender_localpart: "",
+                    namespaces: {
+                        users: [{ exclusive: true, regex: "@prefix_.*:localhost" }],
+                        rooms: [],
+                        aliases: [],
+                    },
+                    url: null,
+                },
+            });
+            expect(appservice.getUserIdForSuffix('foo')).toEqual("@prefix_foo:localhost");
+        });
     });
 
     it('should return the right bot user ID', async () => {
@@ -793,7 +814,6 @@ describe('Appservice', () => {
         await appservice.begin();
 
         try {
-            // eslint-disable-next-line no-inner-declarations
             async function verifyAuth(method: string, route: string) {
                 async function doCall(opts: any = {}) {
                     try {
@@ -928,7 +948,6 @@ describe('Appservice', () => {
         await appservice.begin();
 
         try {
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}, err: any) {
                 try {
                     await requestPromise({
@@ -1005,7 +1024,6 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1073,7 +1091,6 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1150,7 +1167,6 @@ describe('Appservice', () => {
             appservice.on("room.encrypted_event", encryptedEventSpy);
 
             let txnId = 1;
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, spyCallback: () => void) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}${txnId++}`,
@@ -1167,7 +1183,6 @@ describe('Appservice', () => {
                 encryptedEventSpy.callCount = 0;
             }
 
-            // eslint-disable-next-line no-inner-declarations
             async function checkBothPaths(spyCallback: () => void) {
                 await doCall("/transactions/", spyCallback);
                 await doCall("/_matrix/app/v1/transactions/", spyCallback);
@@ -1351,7 +1366,6 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1428,7 +1442,6 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1505,7 +1518,6 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1603,7 +1615,6 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1693,7 +1704,6 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1823,7 +1833,6 @@ describe('Appservice', () => {
             appservice.on("room.leave", leaveSpy);
             appservice.on("room.invite", inviteSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -1843,6 +1852,98 @@ describe('Appservice', () => {
 
             await doCall("/transactions/1", { json: txnBody });
             await doCall("/_matrix/app/v1/transactions/2", { json: txnBody });
+        } finally {
+            appservice.stop();
+        }
+    });
+
+    it('should refresh membership information of intents when actions are performed against them', async () => {
+        const port = await getPort();
+        const hsToken = "s3cret_token";
+        const appservice = new Appservice({
+            port: port,
+            bindAddress: '',
+            homeserverName: 'example.org',
+            homeserverUrl: 'https://localhost',
+            registration: {
+                as_token: "",
+                hs_token: hsToken,
+                sender_localpart: "_bot_",
+                namespaces: {
+                    users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
+                    rooms: [],
+                    aliases: [],
+                },
+                url: null,
+            },
+        });
+        appservice.botIntent.ensureRegistered = () => {
+            return null;
+        };
+
+        await appservice.begin();
+
+        try {
+            const intent = appservice.getIntentForSuffix("test");
+            const refreshSpy = simple.stub().callFn(() => Promise.resolve([]));
+            intent.refreshJoinedRooms = refreshSpy;
+
+            // polyfill the dummy user too
+            const intent2 = appservice.getIntentForSuffix("test___WRONGUSER");
+            intent2.refreshJoinedRooms = () => Promise.resolve([]);
+
+            const joinTxn = {
+                events: [
+                    {
+                        type: "m.room.member",
+                        room_id: "!AAA:example.org",
+                        content: { membership: "join" },
+                        state_key: "@_prefix_test:example.org",
+                        sender: "@_prefix_test:example.org",
+                    },
+                    {
+                        type: "m.room.member",
+                        room_id: "!AAA:example.org",
+                        content: { membership: "join" },
+                        state_key: "@_prefix_test___WRONGUSER:example.org",
+                        sender: "@_prefix_test:example.org",
+                    },
+                ],
+            };
+            const kickTxn = {
+                events: [
+                    {
+                        type: "m.room.member",
+                        room_id: "!AAA:example.org",
+                        content: { membership: "leave" },
+                        state_key: "@_prefix_test:example.org",
+                        sender: "@someone_else:example.org",
+                    },
+                    {
+                        type: "m.room.member",
+                        room_id: "!AAA:example.org",
+                        content: { membership: "leave" },
+                        state_key: "@_prefix_test___WRONGUSER:example.org",
+                        sender: "@someone_else:example.org",
+                    },
+                ],
+            };
+
+            async function doCall(route: string, opts: any = {}) {
+                const res = await requestPromise({
+                    uri: `http://localhost:${port}${route}`,
+                    method: "PUT",
+                    qs: { access_token: hsToken },
+                    ...opts,
+                });
+                expect(res).toMatchObject({});
+
+                expect(refreshSpy.callCount).toBe(1);
+                refreshSpy.callCount = 0;
+            }
+
+            await doCall("/transactions/1", { json: joinTxn });
+            await doCall("/_matrix/app/v1/transactions/2", { json: kickTxn });
         } finally {
             appservice.stop();
         }
@@ -1914,7 +2015,6 @@ describe('Appservice', () => {
             appservice.on("room.upgraded", upgradeSpy);
             appservice.on("room.event", eventSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -2274,7 +2374,6 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -2352,7 +2451,6 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
                     expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`);
@@ -2437,7 +2535,6 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
                     expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`);
@@ -2518,7 +2615,6 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 try {
                     await requestPromise({
@@ -2602,7 +2698,6 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 try {
                     await requestPromise({
@@ -2686,7 +2781,6 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -2758,7 +2852,6 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -2830,7 +2923,6 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 const res = await requestPromise({
                     uri: `http://localhost:${port}${route}`,
@@ -2897,7 +2989,6 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 try {
                     await requestPromise({
@@ -2974,7 +3065,6 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            // eslint-disable-next-line no-inner-declarations
             async function doCall(route: string, opts: any = {}) {
                 try {
                     await requestPromise({
