@@ -4,14 +4,14 @@
   "description": "TypeScript/JavaScript SDK for Matrix bots and appservices",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vector-im/matrix-bot-sdk.git"
+    "url": "git+https://github.com/element-hq/matrix-bot-sdk.git"
   },
   "author": "Element",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/vector-im/matrix-bot-sdk/issues"
+    "url": "https://github.com/element-hq/matrix-bot-sdk/issues"
   },
-  "homepage": "https://github.com/vector-im/matrix-bot-sdk#readme",
+  "homepage": "https://github.com/element-hq/matrix-bot-sdk#readme",
   "publishConfig": {
     "access": "public"
   },
