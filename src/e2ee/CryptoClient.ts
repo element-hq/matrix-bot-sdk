@@ -6,6 +6,8 @@ import {
     RoomId,
     Attachment,
     EncryptedAttachment,
+    SecretStorageKey,
+    SecretStorageEvents,
 } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import { MatrixClient } from "../MatrixClient";
@@ -341,4 +343,105 @@ export class CryptoClient {
             this.engine.backupRoomKeys();
         }
     };
+
+    /*
+     * Confirm's the bot's identity by using a recovery key or passphrase.
+     *
+     * @param {string} key The recovery key or passphrase.
+     */
+    @requiresReady()
+    public async confirmIdentityWithRecoveryKey(key: string): Promise<void> {
+        const machine = this.engine.machine;
+        const ownDevice = await machine.getDevice(machine.userId, machine.deviceId);
+        if (ownDevice.isCrossSigningTrusted()) {
+            LogService.debug("CryptoClient", "Cryptographic identity already confirmed");
+            return;
+        }
+
+        LogService.debug("CryptoClient", "Confirming cryptographic identity with recovery key");
+        const client = this.client;
+        const defaultKeyData = await client.getAccountData<{key: string}>("m.secret_storage.default_key");
+        if (!defaultKeyData || !defaultKeyData.key) {
+            throw new Error("No default recovery key available");
+        }
+        const keyAccountDataName = "m.secret_storage.key." + defaultKeyData.key;
+        const keyInfo = await client.getAccountData(keyAccountDataName);
+        const secretStorageKey = SecretStorageKey.fromAccountData(key, keyAccountDataName, JSON.stringify(keyInfo));
+
+        const masterKeyEvent = await client.getAccountData("m.cross_signing.master");
+        const userSigningKeyEvent = await client.getAccountData("m.cross_signing.user_signing");
+        const selfSigningKeyEvent = await client.getAccountData("m.cross_signing.self_signing");
+
+        const signatureUploadRequest = await this.engine.machine.importSecretsFromSecretStorage(
+            secretStorageKey,
+            new SecretStorageEvents({
+                masterKeyEvent: JSON.stringify(masterKeyEvent),
+                userSigningKeyEvent: JSON.stringify(userSigningKeyEvent),
+                selfSigningKeyEvent: JSON.stringify(selfSigningKeyEvent),
+            }),
+        );
+        LogService.debug("CryptoClient", "Secrets obtained");
+        await this.engine.processOutgoingRequests([signatureUploadRequest]);
+        LogService.debug("CryptoClient", "Identity confirmed");
+    }
+
+    /**
+     * Has recovery been set up on this account.
+     *
+     * Checks whether the account has a default Secret Storage key set up, and
+     * has the cross-signing keys stored in Secret Storage.  It does not check
+     * the validity of the stored keys.
+     *
+     * @returns {boolean} Whether recovery has been set up on this account.
+     */
+    public async isRecoveryAvailable(): Promise<boolean> {
+        try {
+            const client = this.client;
+            const defaultKeyData = await client.getAccountData<{key: string}>("m.secret_storage.default_key");
+            if (!defaultKeyData.key) {
+                return false;
+            }
+            const keyId = defaultKeyData.key;
+            const keyAccountDataName = "m.secret_storage.key." + keyId;
+            const keyInfo = await client.getAccountData(keyAccountDataName);
+            const masterKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.master");
+            const userSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.user_signing");
+            const selfSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.self_signing");
+            return Boolean(masterKeyEvent?.encrypted?.[keyId] &&
+                userSigningKeyEvent?.encrypted?.[keyId] &&
+                selfSigningKeyEvent?.encrypted?.[keyId]);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Creates the bot's cryptographic identity and resets/creates recovery with a
+     * new random recovery key.
+     *
+     * Note: only works if the bot does not have an existing cryptographic
+     * identity, since this doesn't yet perform user interactive auth.
+     *
+     * @returns {string} The recovery key.
+     */
+    public async createIdentity(): Promise<string> {
+        const client = this.client;
+        const secretStorageKey = SecretStorageKey.createRandomKey();
+        const machine = this.engine.machine;
+        const bootstrapRequests = await machine.bootstrapCrossSigning(true);
+        if (bootstrapRequests.uploadKeysReq) {
+            this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
+        }
+        await this.client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
+        await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
+
+        await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
+        await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.eventContent()));
+        const secretStorageEvents = await machine.exportSecretsForSecretStorage(secretStorageKey);
+        await client.setAccountData("m.cross_signing.master", secretStorageEvents.masterKeyEvent);
+        await client.setAccountData("m.cross_signing.user_signing", secretStorageEvents.userSigningKeyEvent);
+        await client.setAccountData("m.cross_signing.self_signing", secretStorageEvents.selfSigningKeyEvent);
+
+        return secretStorageKey.toBase58();
+    }
 }
