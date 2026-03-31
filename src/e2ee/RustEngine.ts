@@ -39,8 +39,14 @@ export class RustEngine {
     private async runOnly(...types: RequestType[]) {
         // Note: we should not be running this until it runs out, so cache the value into a variable
         const requests = await this.machine.outgoingRequests();
+        const filteredRequests = types.length ?
+            requests.filter((request) => types.includes(request.type)) :
+            requests;
+        await this.processOutgoingRequests(requests);
+    }
+
+    public async processOutgoingRequests(requests: Awaited<ReturnType<typeof OlmMachine.prototype.outgoingRequests>>) {
         for (const request of requests) {
-            if (types.length && !types.includes(request.type)) continue;
             switch (request.type) {
                 case RequestType.KeysUpload:
                     await this.processKeysUploadRequest(request);
