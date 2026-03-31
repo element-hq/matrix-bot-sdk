@@ -10,6 +10,7 @@ import {
     KeysUploadRequest,
     KeysQueryRequest,
     ToDeviceRequest,
+    SignatureUploadRequest,
 } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import * as AsyncLock from "async-lock";
 
@@ -63,7 +64,8 @@ export class RustEngine {
                 case RequestType.RoomMessage:
                     throw new Error("Bindings error: Sending room messages is not supported");
                 case RequestType.SignatureUpload:
-                    throw new Error("Bindings error: Backup feature not possible");
+                    await this.processSignatureUploadRequest(request as SignatureUploadRequest);
+                    break;
                 case RequestType.KeysBackup:
                     throw new Error("Bindings error: Backup feature not possible");
                 default:
@@ -159,5 +161,11 @@ export class RustEngine {
     private async actuallyProcessToDeviceRequest(id: string, type: string, messages: Record<string, Record<string, unknown>>) {
         const resp = await this.client.sendToDevices(type, messages);
         await this.machine.markRequestAsSent(id, RequestType.ToDevice, JSON.stringify(resp));
+    }
+
+    private async processSignatureUploadRequest(request: SignatureUploadRequest) {
+        const req = JSON.parse(request.body);
+        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/signatures/upload", null, req.signed_keys);
+        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
     }
 }
