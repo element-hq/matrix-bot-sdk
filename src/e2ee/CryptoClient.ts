@@ -111,6 +111,7 @@ export class CryptoClient {
         LogService.debug("CryptoClient", "Running with device Ed25519 identity:", this.deviceEd25519); // info so all bots know for debugging
 
         this.ready = true;
+        this.client.emit("crypto.ready");
     }
 
     /**
