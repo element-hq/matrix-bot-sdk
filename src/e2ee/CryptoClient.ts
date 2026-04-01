@@ -7,7 +7,7 @@ import {
     Attachment,
     EncryptedAttachment,
     SecretStorageKey,
-    SecretStorageEvents,
+    SecretStorageItems,
 } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import { MatrixClient } from "../MatrixClient";
@@ -375,10 +375,10 @@ export class CryptoClient {
 
         const signatureUploadRequest = await this.engine.machine.importSecretsFromSecretStorage(
             secretStorageKey,
-            new SecretStorageEvents({
-                masterKeyEvent: JSON.stringify(masterKeyEvent),
-                userSigningKeyEvent: JSON.stringify(userSigningKeyEvent),
-                selfSigningKeyEvent: JSON.stringify(selfSigningKeyEvent),
+            new SecretStorageItems({
+                masterKey: JSON.stringify(masterKeyEvent),
+                userSigningKey: JSON.stringify(userSigningKeyEvent),
+                selfSigningKey: JSON.stringify(selfSigningKeyEvent),
             }),
         );
         LogService.debug("CryptoClient", "Secrets obtained");
@@ -437,11 +437,11 @@ export class CryptoClient {
         await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
 
         await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
-        await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.eventContent()));
-        const secretStorageEvents = await machine.exportSecretsForSecretStorage(secretStorageKey);
-        await client.setAccountData("m.cross_signing.master", secretStorageEvents.masterKeyEvent);
-        await client.setAccountData("m.cross_signing.user_signing", secretStorageEvents.userSigningKeyEvent);
-        await client.setAccountData("m.cross_signing.self_signing", secretStorageEvents.selfSigningKeyEvent);
+        await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.accountDataContent()));
+        const secretStorageItems = await machine.exportSecretsForSecretStorage(secretStorageKey);
+        await client.setAccountData("m.cross_signing.master", secretStorageItems.masterKey);
+        await client.setAccountData("m.cross_signing.user_signing", secretStorageItems.userSigningKey);
+        await client.setAccountData("m.cross_signing.self_signing", secretStorageItems.selfSigningKey);
 
         return secretStorageKey.toBase58();
     }
