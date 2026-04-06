@@ -43,7 +43,7 @@ export class RustEngine {
         const filteredRequests = types.length ?
             requests.filter((request) => types.includes(request.type)) :
             requests;
-        await this.processOutgoingRequests(requests);
+        await this.processOutgoingRequests(filteredRequests);
     }
 
     public async processOutgoingRequests(requests: Awaited<ReturnType<typeof OlmMachine.prototype.outgoingRequests>>) {
