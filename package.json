@@ -94,7 +94,6 @@
     "eslint-plugin-matrix-org": "^3.0.0",
     "eslint-plugin-unicorn": "<57",
     "get-port": "5",
-    "globals": "^17.0.0",
     "jest": "^30.2.0",
     "jsdoc": "^4.0.5",
     "matrix-mock-request": "^2.6.0",

@@ -1,5 +1,4 @@
 const matrixOrg = require("eslint-plugin-matrix-org");
-const globals = require("globals");
 const js = require("@eslint/js");
 
 const {
@@ -17,10 +16,6 @@ module.exports = [
     },
 
     languageOptions: {
-        globals: {
-            ...globals.browser,
-            ...globals.node,
-        },
         parserOptions: {
             projectService: true,
         },
