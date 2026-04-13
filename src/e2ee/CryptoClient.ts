@@ -300,7 +300,7 @@ export class CryptoClient {
     /**
      * Confirm's the bot's identity by using a recovery key or passphrase.
      *
-     * @param {string} key The recovery key or passphrase.
+     * @param key The recovery key or passphrase.
      */
     @requiresReady()
     public async confirmIdentityWithRecoveryKey(key: string): Promise<void> {
@@ -325,7 +325,7 @@ export class CryptoClient {
         const userSigningKeyEvent = await client.getAccountData("m.cross_signing.user_signing");
         const selfSigningKeyEvent = await client.getAccountData("m.cross_signing.self_signing");
 
-        const signatureUploadRequest = await this.engine.machine.importSecretsFromSecretStorage(
+        const signatureUploadRequest = await machine.importSecretsFromSecretStorage(
             secretStorageKey,
             new SecretStorageItems({
                 masterKey: JSON.stringify(masterKeyEvent),
@@ -345,7 +345,7 @@ export class CryptoClient {
      * has the cross-signing keys stored in Secret Storage.  It does not check
      * the validity of the stored keys.
      *
-     * @returns {boolean} Whether recovery has been set up on this account.
+     * @returns Whether recovery has been set up on this account.
      */
     public async isRecoveryAvailable(): Promise<boolean> {
         try {
@@ -375,7 +375,7 @@ export class CryptoClient {
      * Note: only works if the bot does not have an existing cryptographic
      * identity, since this doesn't yet perform user interactive auth.
      *
-     * @returns {string} The recovery key.
+     * @returns The recovery key.
      */
     public async createIdentity(): Promise<string> {
         const client = this.client;
@@ -385,7 +385,7 @@ export class CryptoClient {
         if (bootstrapRequests.uploadKeysReq) {
             this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
         }
-        await this.client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
+        await client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
         await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
 
         await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
