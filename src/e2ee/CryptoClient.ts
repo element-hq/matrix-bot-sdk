@@ -361,13 +361,7 @@ export class CryptoClient {
 
         LogService.debug("CryptoClient", "Confirming cryptographic identity with recovery key");
         const client = this.client;
-        const defaultKeyData = await client.getAccountData<{key: string}>("m.secret_storage.default_key");
-        if (!defaultKeyData || !defaultKeyData.key) {
-            throw new Error("No default recovery key available");
-        }
-        const keyAccountDataName = "m.secret_storage.key." + defaultKeyData.key;
-        const keyInfo = await client.getAccountData(keyAccountDataName);
-        const secretStorageKey = SecretStorageKey.fromAccountData(key, keyAccountDataName, JSON.stringify(keyInfo));
+        const secretStorageKey = await this.getDefaultSecretStorageKey(key);
 
         const masterKeyEvent = await client.getAccountData("m.cross_signing.master");
         const userSigningKeyEvent = await client.getAccountData("m.cross_signing.user_signing");
@@ -404,7 +398,7 @@ export class CryptoClient {
             }
             const keyId = defaultKeyData.key;
             const keyAccountDataName = "m.secret_storage.key." + keyId;
-            const keyInfo = await client.getAccountData(keyAccountDataName);
+            const keyInfo = await client.getAccountData<{algorithm: string}>(keyAccountDataName);
             const masterKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.master");
             const userSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.user_signing");
             const selfSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.self_signing");
@@ -418,17 +412,24 @@ export class CryptoClient {
     }
 
     /**
-     * Creates the bot's cryptographic identity and resets/creates recovery with a
-     * new random recovery key.
+     * Creates the bot's cryptographic identity.
      *
      * Note: only works if the bot does not have an existing cryptographic
      * identity, since this doesn't yet perform user interactive auth.
      *
+     * @param key The recovery key or passphrase.  If omitted, a new recovery
+     * key will be created and set as the default recovery key.
+     *
      * @returns The recovery key.
      */
-    public async createIdentity(): Promise<string> {
+    public async createIdentity(key?: string): Promise<string> {
         const client = this.client;
-        const secretStorageKey = SecretStorageKey.createRandomKey();
+        let secretStorageKey: SecretStorageKey;
+        if (key === undefined) {
+            secretStorageKey = SecretStorageKey.createRandomKey();
+        } else {
+            secretStorageKey = await this.getDefaultSecretStorageKey(key);
+        }
         const machine = this.engine.machine;
         const bootstrapRequests = await machine.bootstrapCrossSigning(true);
         if (bootstrapRequests.uploadKeysReq) {
@@ -437,13 +438,37 @@ export class CryptoClient {
         await client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
         await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
 
-        await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
-        await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.accountDataContent()));
+        if (key === undefined) {
+            // If we created a new secret storage key (`key` was not given),
+            // then we need to save the key info to account data, and set it as
+            // the default key.
+            await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
+            await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.accountDataContent()));
+        }
         const secretStorageItems = await machine.exportSecretsForSecretStorage(secretStorageKey);
         await client.setAccountData("m.cross_signing.master", secretStorageItems.masterKey);
         await client.setAccountData("m.cross_signing.user_signing", secretStorageItems.userSigningKey);
         await client.setAccountData("m.cross_signing.self_signing", secretStorageItems.selfSigningKey);
 
         return secretStorageKey.toBase58();
+    }
+
+    /**
+     * Create a `SecretStorageKey` from the given key, assuming it is the default
+     * secret storage key.
+     *
+     * @param key The recovery key or passphrase.
+     *
+     * @returns The `SecretStorageKey`.
+     */
+    private async getDefaultSecretStorageKey(key: string): Promise<SecretStorageKey> {
+        const client = this.client;
+        const defaultKeyData = await client.getAccountData<{key: string}>("m.secret_storage.default_key");
+        if (!defaultKeyData || !defaultKeyData.key) {
+            throw new Error("No default recovery key available");
+        }
+        const keyAccountDataName = "m.secret_storage.key." + defaultKeyData.key;
+        const keyInfo = await client.getAccountData(keyAccountDataName);
+        return SecretStorageKey.fromAccountData(key, keyAccountDataName, JSON.stringify(keyInfo));
     }
 }
