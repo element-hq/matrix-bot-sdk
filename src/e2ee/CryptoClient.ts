@@ -360,7 +360,8 @@ export class CryptoClient {
             const masterKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.master");
             const userSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.user_signing");
             const selfSigningKeyEvent = await client.getAccountData<{encrypted: Record<string, any>}>("m.cross_signing.self_signing");
-            return Boolean(masterKeyEvent?.encrypted?.[keyId] &&
+            return Boolean(keyInfo.algorithm &&
+                masterKeyEvent?.encrypted?.[keyId] &&
                 userSigningKeyEvent?.encrypted?.[keyId] &&
                 selfSigningKeyEvent?.encrypted?.[keyId]);
         } catch {
