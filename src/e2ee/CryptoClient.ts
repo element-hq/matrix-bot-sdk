@@ -442,13 +442,13 @@ export class CryptoClient {
             // If we created a new secret storage key (`key` was not given),
             // then we need to save the key info to account data, and set it as
             // the default key.
-            await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId});
+            await client.setAccountData("m.secret_storage.default_key", {key: secretStorageKey.keyId()});
             await client.setAccountData(secretStorageKey.eventType(), JSON.parse(secretStorageKey.accountDataContent()));
         }
         const secretStorageItems = await machine.exportSecretsForSecretStorage(secretStorageKey);
-        await client.setAccountData("m.cross_signing.master", secretStorageItems.masterKey);
-        await client.setAccountData("m.cross_signing.user_signing", secretStorageItems.userSigningKey);
-        await client.setAccountData("m.cross_signing.self_signing", secretStorageItems.selfSigningKey);
+        await client.setAccountData("m.cross_signing.master", JSON.parse(secretStorageItems.masterKey));
+        await client.setAccountData("m.cross_signing.user_signing", JSON.parse(secretStorageItems.userSigningKey));
+        await client.setAccountData("m.cross_signing.self_signing", JSON.parse(secretStorageItems.selfSigningKey));
 
         return secretStorageKey.toBase58();
     }
