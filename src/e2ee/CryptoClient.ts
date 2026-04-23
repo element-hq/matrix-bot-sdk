@@ -306,7 +306,10 @@ export class CryptoClient {
     public async confirmIdentityWithRecoveryKey(key: string): Promise<void> {
         const machine = this.engine.machine;
         const ownDevice = await machine.getDevice(machine.userId, machine.deviceId);
-        if (ownDevice.isCrossSigningTrusted()) {
+        if (!ownDevice) {
+            LogService.debug("CryptoClient", "Own device not set up yet");
+            throw new Error("Own device not set up yet");
+        } else if (ownDevice.isCrossSigningTrusted()) {
             LogService.debug("CryptoClient", "Cryptographic identity already confirmed");
             return;
         }
@@ -376,16 +379,14 @@ export class CryptoClient {
      */
     public async createIdentity(key?: string): Promise<string> {
         const client = this.client;
-        let secretStorageKey: SecretStorageKey;
-        if (key === undefined) {
-            secretStorageKey = SecretStorageKey.createRandomKey();
-        } else {
-            secretStorageKey = await this.getDefaultSecretStorageKey(key);
-        }
+        const secretStorageKey =
+            key === undefined
+                ? SecretStorageKey.createRandomKey()
+                : await this.getDefaultSecretStorageKey(key);
         const machine = this.engine.machine;
         const bootstrapRequests = await machine.bootstrapCrossSigning(true);
         if (bootstrapRequests.uploadKeysReq) {
-            this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
+            await this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
         }
         await client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
         await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);

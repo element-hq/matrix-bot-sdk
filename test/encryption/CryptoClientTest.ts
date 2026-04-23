@@ -641,7 +641,7 @@ describe('CryptoClient', () => {
                 http1.flushAllExpected(),
             ]);
 
-            // Recovery is not available yet
+            // Recovery is not available yet.
             http1.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(404, (path, obj) => {
                 return {
                     errcode: "M_NOT_FOUND",
@@ -653,7 +653,7 @@ describe('CryptoClient', () => {
                 http1.flushAllExpected(),
             ]))[0]).toBe(false);
 
-            // Create the cryptographic identity, and secret storage
+            // Create the cryptographic identity, and secret storage.
             let crossSigningKeys: Record<string, any>;
             const accountData: Record<string, any> = {};
             http1.when("POST", "/keys/device_signing/upload").respond(200, (path, obj) => {
@@ -663,6 +663,9 @@ describe('CryptoClient', () => {
             http1.when("POST", "/keys/signatures/upload").respond(200, (path, obj) => {
                 return {};
             });
+            // `createIdentity` will set 5 items of account data: the default
+            // secret storage key, the secret storage key info, and the three
+            // cross-signing private keys.
             for (let i = 0; i < 5; i++) {
                 http1.when("PUT", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
                     const components = path.split("/");
@@ -676,7 +679,9 @@ describe('CryptoClient', () => {
                 http1.flushAllExpected(),
             ]);
 
-            // Recovery should be available now
+            // Recovery should be available now.
+            // `isRecoveryAvailable` will read the 5 items of account data that
+            // were set by `createIdentity`.
             for (let i = 0; i < 5; i++) {
                 http1.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
                     const components = path.split("/");
@@ -689,7 +694,7 @@ describe('CryptoClient', () => {
                 http1.flushAllExpected(),
             ]))[0]).toBe(true);
 
-            // The user then starts another client and cross-signs using the recovery key
+            // The user then starts another client and cross-signs using the recovery key.
             const { client: client2, http: http2 } = createTestClient(null, userId, cryptoStoreType);
 
             // Initialize the crypto client.
@@ -704,7 +709,7 @@ describe('CryptoClient', () => {
                 };
             });
             http2.when("POST", "/keys/query").respond(200, (path, obj) => {
-                // We need to send the cross-signing keys in addition to the device keys
+                // We need to send the cross-signing keys in addition to the device keys.
                 return {
                     device_keys: {
                         [userId]: deviceKeys,
@@ -725,7 +730,9 @@ describe('CryptoClient', () => {
                 http2.flushAllExpected(),
             ]);
 
-            // The client cross-signs using the recovery key
+            // The client cross-signs using the recovery key.
+            // `confirmIdentityWithRecoveryKey` will read the 5 items of account
+            // data that were set by `createIdentity`.
             for (let i = 0; i < 5; i++) {
                 http2.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
                     const components = path.split("/");
