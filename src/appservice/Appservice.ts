@@ -35,6 +35,11 @@ enum EduAnnotation {
     Ephemeral = "ephemeral",
 }
 
+export type UrlPreviewQueryCallback = (
+  statusCode: number,
+  response: object,
+) => void;
+
 /**
  * Represents an application service's registration file. This is expected to be
  * loaded from another source, such as a YAML file.
@@ -116,7 +121,22 @@ export interface IAppserviceRegistration {
              * The regular expression that the homeserver uses to determine if an alias is in this namespace.
              */
             regex: string;
-        }[];
+      }[];
+      /**
+        * The allowed urls for previewing the application service is requesting.
+        */
+      "uk.half-shot.msc4417.preview_urls"?: {
+        /**
+          * Whether or not the application service holds an exclusive lock on the namespace. This means that
+          * no other service can handle this URL, and the homeserver will not attempt to resolve it.
+          */
+        exclusive: boolean;
+
+        /**
+          * The regular expression that the homeserver uses to determine if a URL should be handled by this service.
+          */
+        regex: string;
+      }[];
     };
 
     /**
@@ -346,6 +366,12 @@ export class Appservice extends EventEmitter {
         this.app.post("/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
         this.app.post("/_matrix/app/v1/ping", this.onPing.bind(this));
         // We register the 404 handler in the `begin()` function to allow consumers to add their own endpoints.
+
+        this.app.get(
+          "/_matrix/app/unstable/uk.half-shot.msc4417/preview_url",
+          this.onPreviewURL.bind(this),
+        );
+
 
         function getPrefix(namespace: {regex: string}[]|undefined): string|null {
             const prefix = namespace?.length === 1 && (namespace[0].regex || "").split(":")[0];
@@ -1202,5 +1228,46 @@ export class Appservice extends EventEmitter {
         }
         this.pingRequest = undefined;
         res.status(200).json({});
+    }
+
+    private onPreviewURL(
+      req: express.Request<{}, {}, {}, { url: string; user_id?: string }>,
+      res: express.Response,
+    ) {
+      if (!this.isAuthed(req)) {
+        res
+          .status(401)
+          .json({ errcode: "AUTH_FAILED", error: "Authentication failed" });
+        return;
+      }
+      if (!req.query.url || typeof req.query.url !== "string") {
+        return res.status(400).json({
+          errcode: "BAD_JSON",
+          error: "Invalid `url` provided",
+        });
+      }
+      if (req.query.user_id !== undefined) {
+        try {
+          new UserID(req.query.user_id);
+        } catch {
+          return res.status(400).json({
+            errcode: "BAD_JSON",
+            error: "Invalid `user_id` provided",
+          });
+        }
+      }
+      if (!this.eventNames().includes("previewUrl.query")) {
+        res.status(404).json({
+          errcode: "NOT_FOUND",
+          error: "Appservice has not registered any URL preview handlers",
+        });
+      }
+      this.emit(
+        "previewUrl.query",
+        { url: req.query.url, userId: req.query.user_id },
+        ((statusCode, response) => {
+          res.status(statusCode).send(response);
+        }) satisfies UrlPreviewQueryCallback,
+      );
     }
 }
