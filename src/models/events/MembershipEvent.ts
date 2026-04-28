@@ -23,6 +23,7 @@ export type EffectiveMembership = "join" | "leave" | "invite";
 export interface MembershipEventContent {
     avatar_url?: string;
     displayname?: string;
+    reason?: string;
     membership: Membership;
     is_direct?: boolean;
     unsigned?: any;
@@ -48,6 +49,13 @@ export class MembershipEvent extends StateEvent<MembershipEventContent> {
      */
     public get ownMembership(): boolean {
         return this.membershipFor === this.sender;
+    }
+
+    /**
+     * The reason why a user may have sent this membership.
+     */
+    public get reason(): string|undefined {
+        return this.content.reason;
     }
 
     /**

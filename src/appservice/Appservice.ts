@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import * as morgan from "morgan";
 import * as LRU from "lru-cache";
 import { stringify } from "querystring";
+import { randomUUID } from "crypto";
 
 import { Intent } from "./Intent";
 import {
@@ -25,6 +26,7 @@ import {
 } from "..";
 import { MatrixBridge } from "./MatrixBridge";
 import { IApplicationServiceProtocol } from "./http_responses";
+import { AppserviceApis, PingHomeserverResponse } from "../AppserviceApis";
 
 const EDU_ANNOTATION_KEY = "io.t2bot.sdk.bot.type";
 
@@ -46,9 +48,9 @@ export interface IAppserviceRegistration {
     id?: string;
 
     /**
-     * Optional URL at which the application service can be contacted.
+     * URL at which the application service can be contacted. If not in use, this must be `null`.
      */
-    url?: string;
+    url: string|null;
 
     /**
      * The token the application service uses to communicate with the homeserver.
@@ -72,7 +74,7 @@ export interface IAppserviceRegistration {
         /**
          * The user namespaces the application service is requesting.
          */
-        users: {
+        users?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace. This
              * means that no other user on the homeserver may register users that match this namespace.
@@ -88,7 +90,7 @@ export interface IAppserviceRegistration {
         /**
          * The room namespaces the application service is requesting. This is not for alises.
          */
-        rooms: {
+        rooms?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace.
              */
@@ -103,7 +105,7 @@ export interface IAppserviceRegistration {
         /**
          * The room alias namespaces the application service is requesting.
          */
-        aliases: {
+        aliases?: {
             /**
              * Whether or not the application service holds an exclusive lock on the namespace. This means
              * that no other user on the homeserver may register aliases that match this namespace.
@@ -134,6 +136,14 @@ export interface IAppserviceRegistration {
      * @see https://github.com/matrix-org/matrix-doc/pull/2409
      */
     "de.sorunome.msc2409.push_ephemeral"?: boolean;
+
+    /**
+     * ** Experimental **
+     *
+     * Should the AS use the new device management APIs. Optional.
+     * @see https://github.com/matrix-org/matrix-spec-proposals/pull/4190
+     */
+    "io.element.msc4190"?: boolean;
 
     // not interested in other options
 }
@@ -185,6 +195,16 @@ export interface IAppserviceOptions {
     joinStrategy?: IJoinRoomStrategy;
 
     /**
+     * If provided, use this as the user prefix rather than calculating from the namespace.
+     */
+    userPrefix?: string;
+
+    /**
+     * If provided, use this as the alias prefix rather than calculating from the namespace.
+     */
+    aliasPrefix?: string;
+
+    /**
      * Options for how Intents are handled.
      */
     intentOptions?: {
@@ -209,6 +229,12 @@ export interface IAppserviceOptions {
          * Note that the appservice bot account is considered an intent.
          */
         encryption?: boolean;
+
+        /**
+         * Enable the content scanner API when creating new intents. This means
+         * that all media requests will be proxied through the scanner.
+         */
+        enableContentScanner?: boolean;
     };
 }
 
@@ -232,11 +258,23 @@ export class Appservice extends EventEmitter {
     private readonly cryptoStorage: IAppserviceCryptoStorageProvider;
     private readonly bridgeInstance = new MatrixBridge(this);
 
+    private pingRequest?: string;
+
     private app = express();
     private appServer: any;
     private intentsCache: LRU.LRUCache<string, Intent>;
     private eventProcessors: { [eventType: string]: IPreprocessor[] } = {};
-    private pendingTransactions: { [txnId: string]: Promise<any> } = {};
+    private pendingTransactions = new Map<string, Promise<void>>();
+
+    /**
+     * Appservice specific APIs.
+     */
+    public readonly apis: AppserviceApis;
+
+    /**
+     * A cache of intents for the purposes of decrypting rooms
+     */
+    private cryptoClientForRoomId: LRU.LRUCache<string, MatrixClient>;
 
     /**
      * Creates a new application service.
@@ -248,10 +286,15 @@ export class Appservice extends EventEmitter {
         options.joinStrategy = new AppserviceJoinRoomStrategy(options.joinStrategy, this);
 
         if (!options.intentOptions) options.intentOptions = {};
-        if (!options.intentOptions.maxAgeMs) options.intentOptions.maxAgeMs = 60 * 60 * 1000;
-        if (!options.intentOptions.maxCached) options.intentOptions.maxCached = 10000;
+        if (options.intentOptions.maxAgeMs === undefined) options.intentOptions.maxAgeMs = 60 * 60 * 1000;
+        if (options.intentOptions.maxCached === undefined) options.intentOptions.maxCached = 10000;
 
         this.intentsCache = new LRU.LRUCache({
+            max: options.intentOptions.maxCached,
+            ttl: options.intentOptions.maxAgeMs,
+        });
+
+        this.cryptoClientForRoomId = new LRU.LRUCache({
             max: options.intentOptions.maxCached,
             ttl: options.intentOptions.maxAgeMs,
         });
@@ -301,33 +344,24 @@ export class Appservice extends EventEmitter {
         this.app.post("/unstable/org.matrix.msc3983/keys/claim", this.onKeysClaim.bind(this));
         this.app.post("/_matrix/app/v1/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
         this.app.post("/unstable/org.matrix.msc3984/keys/query", this.onKeysQuery.bind(this));
-
+        this.app.post("/_matrix/app/v1/ping", this.onPing.bind(this));
         // We register the 404 handler in the `begin()` function to allow consumers to add their own endpoints.
 
-        if (!this.registration.namespaces || !this.registration.namespaces.users || this.registration.namespaces.users.length === 0) {
-            throw new Error("No user namespaces in registration");
-        }
-        if (this.registration.namespaces.users.length !== 1) {
-            throw new Error("Too many user namespaces registered: expecting exactly one");
-        }
-
-        const userPrefix = (this.registration.namespaces.users[0].regex || "").split(":")[0];
-        if (!userPrefix.endsWith(".*") && !userPrefix.endsWith(".+")) {
-            this.userPrefix = null;
-        } else {
-            this.userPrefix = userPrefix.substring(0, userPrefix.length - 2); // trim off the .* part
-        }
-
-        if (!this.registration.namespaces?.aliases || this.registration.namespaces.aliases.length !== 1) {
-            this.aliasPrefix = null;
-        } else {
-            this.aliasPrefix = (this.registration.namespaces.aliases[0].regex || "").split(":")[0];
-            if (!this.aliasPrefix.endsWith(".*") && !this.aliasPrefix.endsWith(".+")) {
-                this.aliasPrefix = null;
-            } else {
-                this.aliasPrefix = this.aliasPrefix.substring(0, this.aliasPrefix.length - 2); // trim off the .* part
+        function getPrefix(namespace: {regex: string}[]|undefined): string|null {
+            const prefix = namespace?.length === 1 && (namespace[0].regex || "").split(":")[0];
+            if (!prefix) {
+                return null;
             }
+            if (prefix.endsWith(".*") || prefix.endsWith(".+")) {
+                return prefix.slice(0, -2);
+            }
+            return null;
         }
+
+        // Only register a prefix if we register one namespace.
+        this.userPrefix = options.userPrefix !== undefined ? options.userPrefix : getPrefix(this.registration.namespaces.users);
+        this.aliasPrefix = options.aliasPrefix !== undefined ? options.aliasPrefix : getPrefix(this.registration.namespaces.aliases);
+        this.apis = new AppserviceApis(new MatrixClient(options.homeserverUrl, this.registration.as_token), this.registration.id);
     }
 
     /**
@@ -424,6 +458,7 @@ export class Appservice extends EventEmitter {
     /**
      * Gets an Intent for a given user suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The user's suffix
      * @returns {Intent} An Intent for the user.
      */
@@ -434,12 +469,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets a full user ID for a given suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The user's suffix
      * @returns {string} The user's ID.
      */
     public getUserIdForSuffix(suffix: string): string {
         if (!this.userPrefix) {
-            throw new Error(`Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix`);
+            throw new Error(`Cannot use getUserIdForSuffix, provided user namespace did not contain exactly one valid namespace`);
         }
         return `${this.userPrefix}${suffix}:${this.options.homeserverName}`;
     }
@@ -454,6 +490,7 @@ export class Appservice extends EventEmitter {
         if (!intent) {
             intent = new Intent(this.options, userId, this);
             this.intentsCache.set(userId, intent);
+            this.emit("intent.new", intent);
             if (this.options.intentOptions.encryption) {
                 intent.enableEncryption().catch(e => {
                     LogService.error("Appservice", `Failed to set up crypto on intent ${userId}`, e);
@@ -467,12 +504,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets the suffix for the provided user ID. If the user ID is not a namespaced
      * user, this will return a falsey value.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param {string} userId The user ID to parse
      * @returns {string} The suffix from the user ID.
      */
     public getSuffixForUserId(userId: string): string {
         if (!this.userPrefix) {
-            throw new Error(`Cannot use getUserIdForSuffix, provided namespace did not include a valid suffix`);
+            throw new Error(`Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace`);
         }
         if (!userId || !userId.startsWith(this.userPrefix) || !userId.endsWith(`:${this.options.homeserverName}`)) {
             // Invalid ID
@@ -495,7 +533,7 @@ export class Appservice extends EventEmitter {
      */
     public isNamespacedUser(userId: string): boolean {
         return userId === this.botUserId ||
-            !!this.registration.namespaces?.users.find(({ regex }) =>
+            !!this.registration.namespaces.users?.find(({ regex }) =>
                 new RegExp(regex).test(userId),
             );
     }
@@ -513,12 +551,13 @@ export class Appservice extends EventEmitter {
     /**
      * Gets a full alias for a given suffix. The prefix is automatically detected from the registration
      * options.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The alias's suffix
      * @returns {string} The alias.
      */
     public getAliasForSuffix(suffix: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getAliasForSuffix, provided alias namespace did not contain exactly one valid namespace");
         }
         return `${this.aliasPrefix}${suffix}:${this.options.homeserverName}`;
     }
@@ -526,25 +565,27 @@ export class Appservice extends EventEmitter {
     /**
      * Gets the localpart of an alias for a given suffix. The prefix is automatically detected from the registration
      * options. Useful for the createRoom endpoint.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param suffix The alias's suffix
      * @returns {string} The alias localpart.
      */
     public getAliasLocalpartForSuffix(suffix: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getAliasLocalpartForSuffix, provided user namespace did not contain exactly one valid namespace");
         }
-        return `${this.aliasPrefix.substr(1)}${suffix}`;
+        return `${this.aliasPrefix.slice(1)}${suffix}`;
     }
 
     /**
      * Gets the suffix for the provided alias. If the alias is not a namespaced
      * alias, this will return a falsey value.
+     * Note: If the registration file contains *multiple* prefixes then this will throw.
      * @param {string} alias The alias to parse
      * @returns {string} The suffix from the alias.
      */
     public getSuffixForAlias(alias: string): string {
         if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
+            throw new Error("Cannot use getSuffixForUserId, provided user namespace did not contain exactly one valid namespace");
         }
         if (!alias || !this.isNamespacedAlias(alias)) {
             // Invalid ID
@@ -566,10 +607,9 @@ export class Appservice extends EventEmitter {
      * @returns {boolean} true if the alias is namespaced, false otherwise
      */
     public isNamespacedAlias(alias: string): boolean {
-        if (!this.aliasPrefix) {
-            throw new Error("Invalid configured alias prefix");
-        }
-        return alias.startsWith(this.aliasPrefix) && alias.endsWith(":" + this.options.homeserverName);
+        return !!this.registration.namespaces.aliases?.find(({ regex }) =>
+            new RegExp(regex).test(alias),
+        );
     }
 
     /**
@@ -604,6 +644,15 @@ export class Appservice extends EventEmitter {
         });
     }
 
+    /**
+     * Ping the homeserver to check for connectivity and await the response.
+     * @returns Resolves if the ping succeded, otherwise rejects.
+     */
+    public async pingHomeserver(): Promise<PingHomeserverResponse> {
+        this.pingRequest = `matrix-bot-sdk_${randomUUID()}`;
+        return this.apis.pingHomeserver(this.pingRequest);
+    }
+
     private async processEphemeralEvent(event: any): Promise<any> {
         if (!event) return event;
         if (!this.eventProcessors[event["type"]]) return event;
@@ -633,9 +682,7 @@ export class Appservice extends EventEmitter {
         const botDomain = new UserID(this.botUserId).domain;
         if (domain !== botDomain) return; // can't be impersonated, so don't try
 
-        // Update the target intent's joined rooms (fixes transition errors with the cache, like join->kick->join)
         const intent = this.getIntentForUserId(event['state_key']);
-        await intent.refreshJoinedRooms();
 
         const targetMembership = event["content"]["membership"];
         if (targetMembership === "join") {
@@ -659,6 +706,248 @@ export class Appservice extends EventEmitter {
         return providedToken === this.registration.hs_token;
     }
 
+    private async decryptAppserviceEvent(roomId: string, encrypted: EncryptedRoomEvent): ReturnType<Appservice["processEvent"]> {
+        const existingClient = this.cryptoClientForRoomId.get(roomId);
+        const decryptFn = async (client: MatrixClient) => {
+            // Also fetches state in order to decrypt room. We should throw if the client is confused.
+            if (!await client.crypto.isRoomEncrypted(roomId)) {
+                throw new Error("Client detected that the room is not encrypted.");
+            }
+            let event = (await client.crypto.decryptRoomEvent(encrypted, roomId)).raw;
+            event = await this.processEvent(event);
+            this.cryptoClientForRoomId.set(roomId, client);
+            // For logging purposes: show that the event was decrypted
+            LogService.info("Appservice", `Processing decrypted event of type ${event["type"]}`);
+            return event;
+        };
+        // 1. Try cached client
+        if (existingClient) {
+            try {
+                return await decryptFn(existingClient);
+            } catch (error) {
+                LogService.debug("Appservice", `Failed to decrypt via cached client ${await existingClient.getUserId()}`, error);
+                LogService.warn("Appservice", `Cached client was not able to decrypt ${roomId} ${encrypted.eventId} - trying other intents`);
+            }
+        }
+        this.cryptoClientForRoomId.delete(roomId);
+        // 2. Try the bot client
+        if (this.botClient.crypto?.isReady) {
+            try {
+                return await decryptFn(this.botClient);
+            } catch (error) {
+                LogService.debug("Appservice", `Failed to decrypt via bot client`, error);
+                LogService.warn("Appservice", `Bot client was not able to decrypt ${roomId} ${encrypted.eventId} - trying other intents`);
+            }
+        }
+
+        const userIdsInRoom = (await this.botClient.getJoinedRoomMembers(roomId)).filter(u => this.isNamespacedUser(u));
+        // 3. Try existing clients with crypto enabled.
+        for (const intentCacheEntry of this.intentsCache.entries()) {
+            const [userId, intent] = intentCacheEntry as [string, Intent];
+            if (!userIdsInRoom.includes(userId)) {
+                // Not in this room.
+                continue;
+            }
+            // Is this client crypto enabled?
+            if (!intent.underlyingClient.crypto?.isReady) {
+                continue;
+            }
+            try {
+                return await decryptFn(intent.underlyingClient);
+            } catch (error) {
+                LogService.debug("Appservice", `Failed to decrypt via ${userId}`, error);
+                LogService.warn("Appservice", `Existing encrypted client was not able to decrypt ${roomId} ${encrypted.eventId} - trying other intents`);
+            }
+        }
+
+        // 4. Try to enable crypto on any client to decrypt it.
+        // We deliberately do not enable crypto on every client for performance reasons.
+        const userInRoom = this.intentsCache.find((intent, userId) => !intent.underlyingClient.crypto?.isReady && userIdsInRoom.includes(userId));
+        if (!userInRoom) {
+            throw Error('No users in room, cannot decrypt');
+        }
+        try {
+            await userInRoom.enableEncryption();
+            return await decryptFn(userInRoom.underlyingClient);
+        } catch (error) {
+            LogService.debug("Appservice", `Failed to decrypt via random user ${userInRoom.userId}`, error);
+            throw new Error("Unable to decrypt event", { cause: error });
+        }
+    }
+
+    private async handleTransaction(txnId: string, body: Record<string, unknown>) {
+        // Process all the crypto stuff first to ensure that future transactions (if not this one)
+        // will decrypt successfully. We start with EDUs because we need structures to put counts
+        // and such into in a later stage, and EDUs are independent of crypto.
+        if (await this.storage.isTransactionCompleted(txnId)) {
+            // Duplicate.
+            return;
+        }
+
+        const byUserId: {
+            [userId: string]: {
+                counts: Record<string, Number>;
+                toDevice: any[];
+                unusedFallbacks: OTKAlgorithm[];
+            };
+        } = {};
+
+        const orderedEdus = [];
+        if (Array.isArray(body["de.sorunome.msc2409.to_device"])) {
+            orderedEdus.push(...body["de.sorunome.msc2409.to_device"].map(e => ({
+                ...e,
+                unsigned: {
+                    ...e['unsigned'],
+                    [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
+                },
+            })));
+        }
+        if (Array.isArray(body["de.sorunome.msc2409.ephemeral"])) {
+            orderedEdus.push(...body["de.sorunome.msc2409.ephemeral"].map(e => ({
+                ...e,
+                unsigned: {
+                    ...e['unsigned'],
+                    [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
+                },
+            })));
+        }
+        for (let event of orderedEdus) {
+            if (event['edu_type']) event['type'] = event['edu_type']; // handle property change during MSC2409's course
+
+            LogService.info("Appservice", `Processing ${event['unsigned'][EDU_ANNOTATION_KEY]} event of type ${event["type"]}`);
+            event = await this.processEphemeralEvent(event);
+
+            // These events aren't tied to rooms, so just emit them generically
+            this.emit("ephemeral.event", event);
+
+            if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || event.unsigned?.[EDU_ANNOTATION_KEY] === EduAnnotation.ToDevice)) {
+                const toUser = event["to_user_id"];
+                const intent = this.getIntentForUserId(toUser);
+                await intent.enableEncryption();
+
+                if (!byUserId[toUser]) byUserId[toUser] = { counts: null, toDevice: null, unusedFallbacks: null };
+                if (!byUserId[toUser].toDevice) byUserId[toUser].toDevice = [];
+                byUserId[toUser].toDevice.push(event);
+            }
+        }
+
+        const deviceLists = body["org.matrix.msc3202.device_lists"] as { changed: string[], removed: string[] } ?? {
+            changed: [],
+            removed: [],
+        };
+
+        if (!deviceLists.changed) deviceLists.changed = [];
+        if (!deviceLists.removed) deviceLists.removed = [];
+
+        if (deviceLists.changed.length || deviceLists.removed.length) {
+            this.emit("device_lists", deviceLists);
+        }
+
+        let otks = body["org.matrix.msc3202.device_one_time_keys_count"];
+        const otks2 = body["org.matrix.msc3202.device_one_time_key_counts"];
+        if (otks2 && !otks) {
+            LogService.warn(
+                "Appservice",
+                "Your homeserver is using an outdated field (device_one_time_key_counts) to talk to this appservice. " +
+                "If you're using Synapse, please upgrade to 1.73.0 or higher.",
+            );
+            otks = otks2;
+        }
+        if (otks) {
+            this.emit("otk.counts", otks);
+        }
+        if (otks && this.cryptoStorage) {
+            for (const userId of Object.keys(otks)) {
+                const intent = this.getIntentForUserId(userId);
+                await intent.enableEncryption();
+                const otksForUser = otks[userId][intent.underlyingClient.crypto.clientDeviceId];
+                if (otksForUser) {
+                    if (!byUserId[userId]) {
+                        byUserId[userId] = {
+                            counts: null,
+                            toDevice: null,
+                            unusedFallbacks: null,
+                        };
+                    }
+                    byUserId[userId].counts = otksForUser;
+                }
+            }
+        }
+
+        const fallbacks = body["org.matrix.msc3202.device_unused_fallback_key_types"];
+        if (fallbacks) {
+            this.emit("otk.unused_fallback_keys", fallbacks);
+        }
+        if (fallbacks && this.cryptoStorage) {
+            for (const userId of Object.keys(fallbacks)) {
+                const intent = this.getIntentForUserId(userId);
+                await intent.enableEncryption();
+                const fallbacksForUser = fallbacks[userId][intent.underlyingClient.crypto.clientDeviceId];
+                if (Array.isArray(fallbacksForUser) && !fallbacksForUser.includes(OTKAlgorithm.Signed)) {
+                    if (!byUserId[userId]) {
+                        byUserId[userId] = {
+                            counts: null,
+                            toDevice: null,
+                            unusedFallbacks: null,
+                        };
+                    }
+                    byUserId[userId].unusedFallbacks = fallbacksForUser;
+                }
+            }
+        }
+
+        if (this.cryptoStorage) {
+            for (const userId of Object.keys(byUserId)) {
+                const intent = this.getIntentForUserId(userId);
+                await intent.enableEncryption();
+                const info = byUserId[userId];
+                const userStorage = this.storage.storageForUser(userId);
+
+                if (!info.toDevice) info.toDevice = [];
+                if (!info.unusedFallbacks) info.unusedFallbacks = JSON.parse(await userStorage.readValue("last_unused_fallbacks") || "[]");
+                if (!info.counts) info.counts = JSON.parse(await userStorage.readValue("last_counts") || "{}");
+
+                LogService.info("Appservice", `Updating crypto state for ${userId}`);
+                await intent.underlyingClient.crypto.updateSyncData(info.toDevice, info.counts, info.unusedFallbacks, deviceLists.changed, deviceLists.removed);
+            }
+        }
+
+        for (let event of body.events as any[]) {
+            LogService.info("Appservice", `Processing event of type ${event["type"]}`);
+            event = await this.processEvent(event);
+            if (event['type'] === 'm.room.encrypted') {
+                this.emit("room.encrypted_event", event["room_id"], event);
+                if (this.cryptoStorage) {
+                    try {
+                        const encrypted = new EncryptedRoomEvent(event);
+                        const roomId = event['room_id'];
+                        event = await this.decryptAppserviceEvent(roomId, encrypted);
+                        this.emit("room.decrypted_event", roomId, event);
+
+                        // For logging purposes: show that the event was decrypted
+                        LogService.info("Appservice", `Processing decrypted event of type ${event["type"]}`);
+                    } catch (e) {
+                        LogService.error("Appservice", `Decryption error on ${event['room_id']} ${event['event_id']}`, e);
+                        this.emit("room.failed_decryption", event['room_id'], event, e);
+                    }
+                }
+            }
+            this.emit("room.event", event["room_id"], event);
+            if (event['type'] === 'm.room.message') {
+                this.emit("room.message", event["room_id"], event);
+            }
+            if (event['type'] === 'm.room.member' && this.isNamespacedUser(event['state_key'])) {
+                await this.processMembershipEvent(event);
+            }
+            if (event['type'] === 'm.room.tombstone' && event['state_key'] === '') {
+                this.emit("room.archived", event['room_id'], event);
+            }
+            if (event['type'] === 'm.room.create' && event['state_key'] === '' && event['content'] && event['content']['predecessor']) {
+                this.emit("room.upgraded", event['room_id'], event);
+            }
+        }
+    }
+
     private async onTransaction(req: express.Request, res: express.Response): Promise<any> {
         if (!this.isAuthed(req)) {
             res.status(401).json({ errcode: "AUTH_FAILED", error: "Authentication failed" });
@@ -675,16 +964,12 @@ export class Appservice extends EventEmitter {
             return;
         }
 
-        const txnId = req.params["txnId"];
+        const { txnId } = req.params;
 
-        if (await Promise.resolve(this.storage.isTransactionCompleted(txnId))) {
-            res.status(200).json({});
-            return;
-        }
-
-        if (this.pendingTransactions[txnId]) {
+        if (this.pendingTransactions.has(txnId)) {
+            // The homeserver has retried a transaction while we're still handling it.
             try {
-                await this.pendingTransactions[txnId];
+                await this.pendingTransactions.get(txnId);
                 res.status(200).json({});
             } catch (e) {
                 LogService.error("Appservice", e);
@@ -693,214 +978,25 @@ export class Appservice extends EventEmitter {
             return;
         }
 
-        LogService.info("Appservice", "Processing transaction " + txnId);
-        // eslint-disable-next-line no-async-promise-executor
-        this.pendingTransactions[txnId] = new Promise<void>(async (resolve) => {
-            // Process all the crypto stuff first to ensure that future transactions (if not this one)
-            // will decrypt successfully. We start with EDUs because we need structures to put counts
-            // and such into in a later stage, and EDUs are independent of crypto.
-
-            const byUserId: {
-                [userId: string]: {
-                    counts: Record<string, Number>;
-                    toDevice: any[];
-                    unusedFallbacks: OTKAlgorithm[];
-                };
-            } = {};
-
-            const orderedEdus = [];
-            if (Array.isArray(req.body["de.sorunome.msc2409.to_device"])) {
-                orderedEdus.push(...req.body["de.sorunome.msc2409.to_device"].map(e => ({
-                    ...e,
-                    unsigned: {
-                        ...e['unsigned'],
-                        [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
-                    },
-                })));
-            }
-            if (Array.isArray(req.body["de.sorunome.msc2409.ephemeral"])) {
-                orderedEdus.push(...req.body["de.sorunome.msc2409.ephemeral"].map(e => ({
-                    ...e,
-                    unsigned: {
-                        ...e['unsigned'],
-                        [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
-                    },
-                })));
-            }
-            for (let event of orderedEdus) {
-                if (event['edu_type']) event['type'] = event['edu_type']; // handle property change during MSC2409's course
-
-                LogService.info("Appservice", `Processing ${event['unsigned'][EDU_ANNOTATION_KEY]} event of type ${event["type"]}`);
-                event = await this.processEphemeralEvent(event);
-
-                // These events aren't tied to rooms, so just emit them generically
-                this.emit("ephemeral.event", event);
-
-                if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || event.unsigned?.[EDU_ANNOTATION_KEY] === EduAnnotation.ToDevice)) {
-                    const toUser = event["to_user_id"];
-                    const intent = this.getIntentForUserId(toUser);
-                    await intent.enableEncryption();
-
-                    if (!byUserId[toUser]) byUserId[toUser] = { counts: null, toDevice: null, unusedFallbacks: null };
-                    if (!byUserId[toUser].toDevice) byUserId[toUser].toDevice = [];
-                    byUserId[toUser].toDevice.push(event);
-                }
-            }
-
-            const deviceLists: { changed: string[], removed: string[] } = req.body["org.matrix.msc3202.device_lists"] ?? {
-                changed: [],
-                removed: [],
-            };
-
-            if (!deviceLists.changed) deviceLists.changed = [];
-            if (!deviceLists.removed) deviceLists.removed = [];
-
-            if (deviceLists.changed.length || deviceLists.removed.length) {
-                this.emit("device_lists", deviceLists);
-            }
-
-            let otks = req.body["org.matrix.msc3202.device_one_time_keys_count"];
-            const otks2 = req.body["org.matrix.msc3202.device_one_time_key_counts"];
-            if (otks2 && !otks) {
-                LogService.warn(
-                    "Appservice",
-                    "Your homeserver is using an outdated field (device_one_time_key_counts) to talk to this appservice. " +
-                    "If you're using Synapse, please upgrade to 1.73.0 or higher.",
-                );
-                otks = otks2;
-            }
-            if (otks) {
-                this.emit("otk.counts", otks);
-            }
-            if (otks && this.cryptoStorage) {
-                for (const userId of Object.keys(otks)) {
-                    const intent = this.getIntentForUserId(userId);
-                    await intent.enableEncryption();
-                    const otksForUser = otks[userId][intent.underlyingClient.crypto.clientDeviceId];
-                    if (otksForUser) {
-                        if (!byUserId[userId]) {
-                            byUserId[userId] = {
-                                counts: null,
-                                toDevice: null,
-                                unusedFallbacks: null,
-                            };
-                        }
-                        byUserId[userId].counts = otksForUser;
-                    }
-                }
-            }
-
-            const fallbacks = req.body["org.matrix.msc3202.device_unused_fallback_key_types"];
-            if (fallbacks) {
-                this.emit("otk.unused_fallback_keys", fallbacks);
-            }
-            if (fallbacks && this.cryptoStorage) {
-                for (const userId of Object.keys(fallbacks)) {
-                    const intent = this.getIntentForUserId(userId);
-                    await intent.enableEncryption();
-                    const fallbacksForUser = fallbacks[userId][intent.underlyingClient.crypto.clientDeviceId];
-                    if (Array.isArray(fallbacksForUser) && !fallbacksForUser.includes(OTKAlgorithm.Signed)) {
-                        if (!byUserId[userId]) {
-                            byUserId[userId] = {
-                                counts: null,
-                                toDevice: null,
-                                unusedFallbacks: null,
-                            };
-                        }
-                        byUserId[userId].unusedFallbacks = fallbacksForUser;
-                    }
-                }
-            }
-
-            if (this.cryptoStorage) {
-                for (const userId of Object.keys(byUserId)) {
-                    const intent = this.getIntentForUserId(userId);
-                    await intent.enableEncryption();
-                    const info = byUserId[userId];
-                    const userStorage = this.storage.storageForUser(userId);
-
-                    if (!info.toDevice) info.toDevice = [];
-                    if (!info.unusedFallbacks) info.unusedFallbacks = JSON.parse(await userStorage.readValue("last_unused_fallbacks") || "[]");
-                    if (!info.counts) info.counts = JSON.parse(await userStorage.readValue("last_counts") || "{}");
-
-                    LogService.info("Appservice", `Updating crypto state for ${userId}`);
-                    await intent.underlyingClient.crypto.updateSyncData(info.toDevice, info.counts, info.unusedFallbacks, deviceLists.changed, deviceLists.removed);
-                }
-            }
-
-            for (let event of req.body["events"]) {
-                LogService.info("Appservice", `Processing event of type ${event["type"]}`);
-                event = await this.processEvent(event);
-                if (event['type'] === 'm.room.encrypted') {
-                    this.emit("room.encrypted_event", event["room_id"], event);
-                    if (this.cryptoStorage) {
-                        try {
-                            const encrypted = new EncryptedRoomEvent(event);
-                            const roomId = event['room_id'];
-                            try {
-                                event = (await this.botClient.crypto.decryptRoomEvent(encrypted, roomId)).raw;
-                                event = await this.processEvent(event);
-                                this.emit("room.decrypted_event", roomId, event);
-
-                                // For logging purposes: show that the event was decrypted
-                                LogService.info("Appservice", `Processing decrypted event of type ${event["type"]}`);
-                            } catch (e1) {
-                                LogService.warn("Appservice", `Bot client was not able to decrypt ${roomId} ${event['event_id']} - trying other intents`);
-
-                                let tryUserId: string;
-                                try {
-                                    // TODO: This could be more efficient
-                                    const userIdsInRoom = await this.botClient.getJoinedRoomMembers(roomId);
-                                    tryUserId = userIdsInRoom.find(u => this.isNamespacedUser(u));
-                                } catch (e) {
-                                    LogService.error("Appservice", "Failed to get members of room - cannot decrypt message");
-                                }
-
-                                if (tryUserId) {
-                                    const intent = this.getIntentForUserId(tryUserId);
-
-                                    event = (await intent.underlyingClient.crypto.decryptRoomEvent(encrypted, roomId)).raw;
-                                    event = await this.processEvent(event);
-                                    this.emit("room.decrypted_event", roomId, event);
-
-                                    // For logging purposes: show that the event was decrypted
-                                    LogService.info("Appservice", `Processing decrypted event of type ${event["type"]}`);
-                                } else {
-                                    // noinspection ExceptionCaughtLocallyJS
-                                    throw e1;
-                                }
-                            }
-                        } catch (e) {
-                            LogService.error("Appservice", `Decryption error on ${event['room_id']} ${event['event_id']}`, e);
-                            this.emit("room.failed_decryption", event['room_id'], event, e);
-                        }
-                    }
-                }
-                this.emit("room.event", event["room_id"], event);
-                if (event['type'] === 'm.room.message') {
-                    this.emit("room.message", event["room_id"], event);
-                }
-                if (event['type'] === 'm.room.member' && this.isNamespacedUser(event['state_key'])) {
-                    await this.processMembershipEvent(event);
-                }
-                if (event['type'] === 'm.room.tombstone' && event['state_key'] === '') {
-                    this.emit("room.archived", event['room_id'], event);
-                }
-                if (event['type'] === 'm.room.create' && event['state_key'] === '' && event['content'] && event['content']['predecessor']) {
-                    this.emit("room.upgraded", event['room_id'], event);
-                }
-            }
-
-            resolve();
-        });
+        LogService.info("Appservice", `Processing transaction ${txnId}`);
+        const txnHandler = this.handleTransaction(txnId, req.body);
+        this.pendingTransactions.set(txnId, txnHandler);
 
         try {
-            await this.pendingTransactions[txnId];
-            await Promise.resolve(this.storage.setTransactionCompleted(txnId));
+            await txnHandler;
+            try {
+                await this.storage.setTransactionCompleted(txnId);
+            } catch (ex) {
+                // Not fatal for the transaction since we *did* process it, but we should
+                // warn loudly.
+                LogService.warn("Appservice", "Failed to store completed transaction", ex);
+            }
             res.status(200).json({});
         } catch (e) {
             LogService.error("Appservice", e);
             res.status(500).json({});
+        } finally {
+            this.pendingTransactions.delete(txnId);
         }
     }
 
@@ -1085,5 +1181,26 @@ export class Appservice extends EventEmitter {
 
     private onThirdpartyLocation(req: express.Request, res: express.Response) {
         return this.handleThirdpartyObject(req, res, "location", req.query["alias"] as string);
+    }
+
+    private onPing(req: express.Request, res: express.Response) {
+        if (!this.isAuthed(req)) {
+            res.status(401).json({ errcode: "AUTH_FAILED", error: "Authentication failed" });
+            return;
+        }
+        if (typeof (req.body) !== "object") {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "Expected JSON" });
+            return;
+        }
+        if (!this.pingRequest) {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "No ping request expected" });
+            return;
+        }
+        if (req.body.transaction_id !== this.pingRequest) {
+            res.status(400).json({ errcode: "BAD_REQUEST", error: "transaction_id did not match" });
+            return;
+        }
+        this.pingRequest = undefined;
+        res.status(200).json({});
     }
 }

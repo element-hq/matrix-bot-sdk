@@ -33,6 +33,7 @@ describe('AutojoinRoomsMixin', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -74,6 +75,7 @@ describe('AutojoinRoomsMixin', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -138,6 +140,7 @@ describe('AutojoinRoomsMixin', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {

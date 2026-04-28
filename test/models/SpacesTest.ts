@@ -1,6 +1,6 @@
 import * as simple from "simple-mock";
 
-import { Space } from "../../src";
+import { APIRoomStateEvent, Space } from "../../src";
 import { createTestClient } from "../TestUtils";
 
 describe('Space', () => {
@@ -215,12 +215,13 @@ describe('Space', () => {
 
             const parentRoomId = "!parent:example.org";
             const expectedRoomIds = ["!room2:example.org", "!room4:example.org"];
-            const stateEvents = [
-                { type: "m.room.create", content: { type: 'm.space' }, state_key: "" },
-                { type: "m.space.child", content: { suggested: true, via: [via] }, state_key: "!room1:example.org" },
-                { type: "m.space.child", content: { suggested: false, via: [via] }, state_key: expectedRoomIds[0] },
-                { type: "m.space.child", content: { suggested: true, via: [via2] }, state_key: "!room3:example.org" },
-                { type: "m.space.child", content: { suggested: false, via: [via2] }, state_key: expectedRoomIds[1] },
+            const extra = { event_id: "$foo", room_id: "!room", origin_server_ts: 1, sender: "@sender", unsigned: {} };
+            const stateEvents: APIRoomStateEvent[] = [
+                { type: "m.room.create", content: { type: 'm.space' }, state_key: "", ...extra },
+                { type: "m.space.child", content: { suggested: true, via: [via] }, state_key: "!room1:example.org", ...extra },
+                { type: "m.space.child", content: { suggested: false, via: [via] }, state_key: expectedRoomIds[0], ...extra },
+                { type: "m.space.child", content: { suggested: true, via: [via2] }, state_key: "!room3:example.org", ...extra },
+                { type: "m.space.child", content: { suggested: false, via: [via2] }, state_key: expectedRoomIds[1], ...extra },
             ];
             client.getRoomState = async (roomId) => {
                 expect(roomId).toBe(parentRoomId);

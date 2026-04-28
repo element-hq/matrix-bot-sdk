@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 import {
     DeviceKeyAlgorithm,
     extractRequestError,
@@ -34,7 +36,6 @@ export class Intent {
 
     private client: MatrixClient;
     private unstableApisInstance: UnstableAppserviceApis;
-    private knownJoinedRooms: string[] = [];
     private cryptoSetupPromise: Promise<void>;
 
     /**
@@ -62,7 +63,10 @@ export class Intent {
                 throw new Error("Tried to set up client with crypto, but no persistent storage");
             }
         }
-        this.client = new MatrixClient(this.options.homeserverUrl, accessToken ?? this.options.registration.as_token, storage, cryptoStore);
+
+        this.client = new MatrixClient(this.options.homeserverUrl, accessToken ?? this.options.registration.as_token, storage, cryptoStore, {
+            enableContentScanner: this.options.intentOptions?.enableContentScanner,
+        });
         this.client.metrics = new Metrics(this.appservice.metrics); // Metrics only go up by one parent
         this.unstableApisInstance = new UnstableAppserviceApis(this.client);
         if (this.impersonateUserId !== this.appservice.botUserId) {
@@ -98,104 +102,137 @@ export class Intent {
 
     /**
      * Sets up crypto on the client if it hasn't already been set up.
+     * @param providedDeviceId Optional device ID. If given, this will used instead of trying to
+     * masquerade as the first non-key enabled device.
      * @returns {Promise<void>} Resolves when complete.
      */
     @timedIntentFunctionCall()
-    public async enableEncryption(): Promise<void> {
+    public async enableEncryption(providedDeviceId?: string): Promise<void> {
         if (!this.cryptoSetupPromise) {
-            // eslint-disable-next-line no-async-promise-executor
-            this.cryptoSetupPromise = new Promise(async (resolve, reject) => {
-                try {
-                    // Prepare a client first
-                    await this.ensureRegistered();
-                    const storage = this.storage?.storageForUser?.(this.userId);
-                    this.client.impersonateUserId(this.userId); // make sure the devices call works
+            this.cryptoSetupPromise = (async () => {
+                // Prepare a client first
+                await this.ensureRegistered();
+                const storage = this.storage?.storageForUser?.(this.userId);
 
-                    const cryptoStore = this.cryptoStorage?.storageForUser(this.userId);
-                    if (!cryptoStore) {
-                        // noinspection ExceptionCaughtLocallyJS
-                        throw new Error("Failed to create crypto store");
-                    }
+                // This makes sure the current client isn't impersonating a
+                // non-existing device before we try to do a call
+                this.client.impersonateUserId(this.userId); 
 
-                    // Try to impersonate a device ID
-                    const ownDevices = await this.client.getOwnDevices();
-                    let deviceId = await cryptoStore.getDeviceId();
-                    if (!deviceId || !ownDevices.some(d => d.device_id === deviceId)) {
-                        const deviceKeys = await this.client.getUserDevices([this.userId]);
-                        const userDeviceKeys = deviceKeys.device_keys[this.userId];
-                        if (userDeviceKeys) {
-                            // We really should be validating signatures here, but we're actively looking
-                            // for devices without keys to impersonate, so it should be fine. In theory,
-                            // those devices won't even be present but we're cautious.
-                            const devicesWithKeys = Array.from(Object.entries(userDeviceKeys))
-                                .filter(d => d[0] === d[1].device_id && !!d[1].keys?.[`${DeviceKeyAlgorithm.Curve25519}:${d[1].device_id}`])
-                                .map(t => t[0]); // grab device ID from tuple
-                            deviceId = ownDevices.find(d => !devicesWithKeys.includes(d.device_id))?.device_id;
-                        }
-                    }
-                    let prepared = false;
-                    if (deviceId) {
-                        this.makeClient(true);
-                        this.client.impersonateUserId(this.userId, deviceId);
-
-                        // verify that the server supports impersonating the device
-                        const respDeviceId = (await this.client.getWhoAmI()).device_id;
-                        prepared = (respDeviceId === deviceId);
-                    }
-
-                    if (!prepared) {
-                        // XXX: We work around servers that don't support device_id impersonation
-                        const accessToken = await Promise.resolve(storage?.readValue("accessToken"));
-                        if (!accessToken) {
-                            const loginBody = {
-                                type: "m.login.application_service",
-                                identifier: {
-                                    type: "m.id.user",
-                                    user: this.userId,
-                                },
-                            };
-                            const res = await this.client.doRequest("POST", "/_matrix/client/v3/login", {}, loginBody);
-                            this.makeClient(true, res['access_token']);
-                            storage.storeValue("accessToken", this.client.accessToken);
-                            prepared = true;
-                        } else {
-                            this.makeClient(true, accessToken);
-                            prepared = true;
-                        }
-                    }
-
-                    if (!prepared) {// noinspection ExceptionCaughtLocallyJS
-                        throw new Error("Unable to establish a device ID");
-                    }
-
-                    // Now set up crypto
-                    await this.client.crypto.prepare(await this.refreshJoinedRooms());
-
-                    this.appservice.on("room.event", (roomId, event) => {
-                        if (!this.knownJoinedRooms.includes(roomId)) return;
-                        this.client.crypto.onRoomEvent(roomId, event);
-                    });
-
-                    resolve();
-                } catch (e) {
-                    reject(e);
+                const cryptoStore = this.cryptoStorage?.storageForUser(this.userId);
+                if (!cryptoStore) {
+                    // noinspection ExceptionCaughtLocallyJS
+                    throw new Error("Failed to create crypto store");
                 }
-            });
+
+                // XXX: `getDeviceId` is a terrible API as it might return
+                // an empty string instead of null. We replace it with null.
+                let deviceId: string | null = await cryptoStore.getDeviceId() || null;
+
+                // If we got an explicit device provided as parameter, use that
+                if (providedDeviceId) {
+                  if (deviceId && deviceId !== providedDeviceId) {
+                      LogService.warn("Intent", `Storage already configured with an existing device ${deviceId}. Old storage will be cleared.`);
+                  }
+                  deviceId = providedDeviceId;
+                }
+
+                // If we don't have a device, look at existing devices that
+                // *don't* yet have keys uploaded and try to adopt one
+                if (!deviceId) {
+                  const ownDevices = await this.client.getOwnDevices();
+                  const deviceKeys = await this.client.getUserDevices([this.userId]);
+                  const userDeviceKeys = deviceKeys.device_keys[this.userId];
+                  if (userDeviceKeys) {
+                      // We really should be validating signatures here, but we're actively looking
+                      // for devices without keys to impersonate, so it should be fine. In theory,
+                      // those devices won't even be present but we're cautious.
+                      const devicesWithKeys = Array.from(Object.entries(userDeviceKeys))
+                          .filter(d => d[0] === d[1].device_id && !!d[1].keys?.[`${DeviceKeyAlgorithm.Curve25519}:${d[1].device_id}`])
+                          .map(t => t[0]); // grab device ID from tuple
+                      deviceId = ownDevices.find(d => !devicesWithKeys.includes(d.device_id))?.device_id;
+                  }
+                }
+
+                // If we still don't have a device ID, generate a random one
+                if (!deviceId) {
+                  deviceId = randomUUID();
+                }
+
+                try {
+                  // Make sure the device is registered. Before Matrix C-S 1.17, this would fail if the device doesn't exist.
+                  // After 1.17 (or if `io.element.msc4190` is set in the registration file for Synapse 1.121+), it creates the device on the fly
+                  await this.client.doRequest("PUT", `/_matrix/client/v3/devices/${deviceId}`, null, {});
+                } catch {
+                  deviceId = null;
+                }
+
+                if (deviceId) {
+                    // Check that we can impersonate the device ID
+                    this.client.impersonateUserId(this.userId, deviceId);
+                    const respDeviceId = (await this.client.getWhoAmI()).device_id;
+                    if (respDeviceId !== deviceId) {
+                      deviceId = null;
+                    }
+                }
+
+                // Last resort if we don't have a device ID: have a per-user
+                // access token, and do an appservice login if that fails
+                let accessToken: string | undefined;
+                if (!deviceId) {
+                    // Check if we have an existing access token and test it
+                    accessToken = await storage?.readValue("accessToken") || undefined;
+                    if (accessToken) {
+                        this.makeClient(false, accessToken);
+                        try {
+                            // Check that we can use the existing token
+                            await this.client.getWhoAmI();
+                        } catch {
+                            accessToken = undefined;
+                        }
+                    }
+
+                    // If the existing access token was not working or absent,
+                    // do an appservice login as a last resort
+                    if (!accessToken) {
+                        // Reset the MatrixClient
+                        this.makeClient(false);
+                        const loginBody = {
+                            type: "m.login.application_service",
+                            identifier: {
+                                type: "m.id.user",
+                                user: this.userId,
+                            },
+                        };
+                        const res = await this.client.doRequest("POST", "/_matrix/client/v3/login", {}, loginBody);
+                        accessToken = res['access_token'];
+                        deviceId = res['device_id'];
+                        await storage.storeValue("accessToken", this.client.accessToken);
+                    }
+                }
+
+                this.makeClient(true, accessToken);
+                this.client.impersonateUserId(this.userId, deviceId);
+
+                // Now set up crypto
+                await this.client.crypto.prepare();
+
+                this.appservice.on("room.event", (roomId, event) => {
+                    this.client.crypto.onRoomEvent(roomId, event);
+                });
+            })();
         }
         return this.cryptoSetupPromise;
     }
 
     /**
-     * Gets the joined rooms for the intent. Note that by working around
-     * the intent to join rooms may yield inaccurate results.
+     * Gets the joined rooms for the intent.
      * @returns {Promise<string[]>} Resolves to an array of room IDs where
      * the intent is joined.
      */
     @timedIntentFunctionCall()
     public async getJoinedRooms(): Promise<string[]> {
         await this.ensureRegistered();
-        if (this.knownJoinedRooms.length === 0) await this.refreshJoinedRooms();
-        return this.knownJoinedRooms.map(r => r); // clone
+        return await this.client.getJoinedRooms();
     }
 
     /**
@@ -207,10 +244,7 @@ export class Intent {
     @timedIntentFunctionCall()
     public async leaveRoom(roomId: string, reason?: string): Promise<any> {
         await this.ensureRegistered();
-        return this.client.leaveRoom(roomId, reason).then(async () => {
-            // Recalculate joined rooms now that we've left a room
-            await this.refreshJoinedRooms();
-        });
+        return this.client.leaveRoom(roomId, reason);
     }
 
     /**
@@ -221,11 +255,7 @@ export class Intent {
     @timedIntentFunctionCall()
     public async joinRoom(roomIdOrAlias: string): Promise<string> {
         await this.ensureRegistered();
-        return this.client.joinRoom(roomIdOrAlias).then(async roomId => {
-            // Recalculate joined rooms now that we've joined a room
-            await this.refreshJoinedRooms();
-            return roomId;
-        });
+        return this.client.joinRoom(roomIdOrAlias);
     }
 
     /**
@@ -267,35 +297,23 @@ export class Intent {
      * Ensures the user is joined to the given room
      * @param {string} roomId The room ID to join
      * @returns {Promise<any>} Resolves when complete
+     * @deprecated Use `joinRoom()` instead
      */
     @timedIntentFunctionCall()
     public async ensureJoined(roomId: string) {
-        if (this.knownJoinedRooms.indexOf(roomId) !== -1) {
-            return;
-        }
-
-        await this.refreshJoinedRooms();
-
-        if (this.knownJoinedRooms.indexOf(roomId) !== -1) {
-            return;
-        }
-
         const returnedRoomId = await this.client.joinRoom(roomId);
-        if (!this.knownJoinedRooms.includes(returnedRoomId)) {
-            this.knownJoinedRooms.push(returnedRoomId);
-        }
         return returnedRoomId;
     }
 
     /**
      * Refreshes which rooms the user is joined to, potentially saving time on
      * calls like ensureJoined()
+     * @deprecated There is no longer a joined rooms cache, use `getJoinedRooms()` instead
      * @returns {Promise<string[]>} Resolves to the joined room IDs for the user.
      */
     @timedIntentFunctionCall()
     public async refreshJoinedRooms(): Promise<string[]> {
-        this.knownJoinedRooms = await this.client.getJoinedRooms();
-        return this.knownJoinedRooms.map(r => r); // clone
+        return await this.getJoinedRooms();
     }
 
     /**
@@ -311,6 +329,7 @@ export class Intent {
                     type: "m.login.application_service",
                     username: this.userId.substring(1).split(":")[0],
                     device_id: deviceId,
+                    inhibit_login: true,
                 });
 
                 // HACK: Workaround for unit tests

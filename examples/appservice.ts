@@ -19,6 +19,7 @@ const registration: IAppserviceRegistration = {
         rooms: [],
         aliases: [],
     },
+    url: null,
 };
 
 LogService.info("index", "Setting up appservice with in-memory storage");

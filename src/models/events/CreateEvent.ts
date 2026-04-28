@@ -63,7 +63,7 @@ export class CreateEvent extends StateEvent<CreateEventContent> {
      * The user ID who created the room.
      */
     public get creator(): string {
-        return this.content.creator || this.sender;
+        return this.sender;
     }
 
     /**

@@ -40,7 +40,7 @@ export class MentionPill {
                 let profile = null;
 
                 if (inRoomId) {
-                    profile = await client.getRoomStateEvent(inRoomId, "m.room.member", userId);
+                    profile = await client.getRoomStateEventContent(inRoomId, "m.room.member", userId);
                 }
                 if (!profile) {
                     profile = await client.getUserProfile(userId);
@@ -70,9 +70,9 @@ export class MentionPill {
         try {
             if (client) {
                 const roomId = await client.resolveRoom(roomIdOrAlias);
-                const canonicalAlias = await client.getRoomStateEvent(roomId, "m.room.canonical_alias", "");
+                const canonicalAlias = await client.getRoomStateEventContent(roomId, "m.room.canonical_alias", "");
                 if (canonicalAlias?.alias) {
-                    displayProp = canonicalAlias.alias;
+                    displayProp = canonicalAlias.alias as string;
                     permalink = Permalinks.forRoom(displayProp);
                 }
             }

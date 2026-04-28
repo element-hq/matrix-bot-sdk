@@ -28,6 +28,7 @@ import { EncryptedFile } from "../models/events/MessageEvent";
 import { RustSdkCryptoStorageProvider } from "../storage/RustSdkCryptoStorageProvider";
 import { RustEngine, SYNC_LOCK_NAME } from "./RustEngine";
 import { MembershipEvent } from "../models/events/MembershipEvent";
+import { IKeyBackupInfoRetrieved } from "../models/KeyBackup";
 
 /**
  * Manages encryption for a MatrixClient. Get an instance from a MatrixClient directly
@@ -76,29 +77,29 @@ export class CryptoClient {
      * Prepares the crypto client for usage.
      * @param {string[]} roomIds The room IDs the MatrixClient is joined to.
      */
-    public async prepare(roomIds: string[]) {
-        await this.roomTracker.prepare(roomIds);
-
+    public async prepare() {
         if (this.ready) return; // stop re-preparing here
 
         const storedDeviceId = await this.client.cryptoStore.getDeviceId();
-        if (storedDeviceId) {
-            this.deviceId = storedDeviceId;
-        } else {
-            const deviceId = (await this.client.getWhoAmI())['device_id'];
-            if (!deviceId) {
-                throw new Error("Encryption not possible: server not revealing device ID");
-            }
-            this.deviceId = deviceId;
-            await this.client.cryptoStore.setDeviceId(this.deviceId);
+        const { user_id: userId, device_id: deviceId } = (await this.client.getWhoAmI());
+
+        if (!deviceId) {
+            throw new Error("Encryption not possible: server not revealing device ID");
         }
 
-        LogService.info("CryptoClient", "Starting with device ID:", this.deviceId); // info so all bots know for debugging
+        const storagePath = await this.storage.getMachineStoragePath(deviceId);
+
+        if (storedDeviceId !== deviceId) {
+            this.client.cryptoStore.setDeviceId(deviceId);
+        }
+        this.deviceId = deviceId;
+
+        LogService.info("CryptoClient", `Starting ${userId} with device ID:`, this.deviceId); // info so all bots know for debugging
 
         const machine = await OlmMachine.initialize(
-            new UserId(await this.client.getUserId()),
+            new UserId(userId),
             new DeviceId(this.deviceId),
-            this.storage.storagePath, "",
+            storagePath, "",
             this.storage.storageType,
         );
         this.engine = new RustEngine(machine, this.client);
@@ -108,7 +109,7 @@ export class CryptoClient {
         this.deviceCurve25519 = identity.curve25519.toBase64();
         this.deviceEd25519 = identity.ed25519.toBase64();
 
-        LogService.debug("CryptoClient", "Running with device Ed25519 identity:", this.deviceEd25519); // info so all bots know for debugging
+        LogService.info("CryptoClient", `Running ${userId} with device Ed25519 identity:`, this.deviceEd25519); // info so all bots know for debugging
 
         this.ready = true;
         this.client.emit("crypto.ready");
@@ -120,7 +121,7 @@ export class CryptoClient {
      * @param roomId The room ID.
      * @param event The event.
      */
-    public async onRoomEvent(roomId: string, event: any) {
+    public async onRoomEvent(roomId: string, event: any): Promise<void> {
         await this.roomTracker.onRoomEvent(roomId, event);
         if (typeof event['state_key'] !== 'string') return;
         if (event['type'] === 'm.room.member') {
@@ -128,8 +129,10 @@ export class CryptoClient {
             if (membership.effectiveMembership !== 'join' && membership.effectiveMembership !== 'invite') return;
             await this.engine.addTrackedUsers([membership.membershipFor]);
         } else if (event['type'] === 'm.room.encryption') {
-            const members = await this.client.getRoomMembers(roomId, null, ['join', 'invite']);
-            await this.engine.addTrackedUsers(members.map(e => e.membershipFor));
+            return this.client.getRoomMembers(roomId, null, ['join', 'invite']).then(
+                members => this.engine.addTrackedUsers(members.map(e => e.membershipFor)),
+                e => void LogService.warn("CryptoClient", `Unable to get members of room ${roomId}`),
+            );
         }
     }
 
@@ -144,6 +147,16 @@ export class CryptoClient {
             const members = await this.client.getRoomMembers(roomId, null, ['join', 'invite']);
             await this.engine.addTrackedUsers(members.map(e => e.membershipFor));
         }
+    }
+
+    /**
+     * Exports a set of keys for a given session.
+     * @param roomId The room ID for the session.
+     * @param sessionId The session ID.
+     * @returns An array of session keys.
+     */
+    public async exportRoomKeysForSession(roomId: string, sessionId: string) {
+        return this.engine.exportRoomKeysForSession(roomId, sessionId);
     }
 
     /**
@@ -180,12 +193,13 @@ export class CryptoClient {
             leftDeviceLists.map(u => new UserId(u)));
 
         await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
-            const syncResp = await this.engine.machine.receiveSyncChanges(deviceMessages, deviceLists, otkCounts, unusedFallbackKeyAlgs);
-            const decryptedToDeviceMessages = JSON.parse(syncResp);
-            if (Array.isArray(decryptedToDeviceMessages)) {
-                for (const msg of decryptedToDeviceMessages) {
+            const syncResp = JSON.parse(await this.engine.machine.receiveSyncChanges(deviceMessages, deviceLists, otkCounts, unusedFallbackKeyAlgs));
+            if (Array.isArray(syncResp) && syncResp.length === 2 && Array.isArray(syncResp[0])) {
+                for (const msg of syncResp[0] as IToDeviceMessage[]) {
                     this.client.emit("to_device.decrypted", msg);
                 }
+            } else {
+                LogService.error("CryptoClient", "OlmMachine.receiveSyncChanges did not return an expected value of [to-device events, room key changes]");
             }
 
             await this.engine.run();
@@ -288,7 +302,9 @@ export class CryptoClient {
      */
     @requiresReady()
     public async decryptMedia(file: EncryptedFile): Promise<Buffer> {
-        const contents = (await this.client.downloadContent(file.url)).data;
+        const contents = this.client.contentScannerInstance ?
+            await this.client.contentScannerInstance.downloadEncryptedContent(file) :
+            (await this.client.downloadContent(file.url)).data;
         const encrypted = new EncryptedAttachment(
             contents,
             JSON.stringify(file),
@@ -424,4 +440,36 @@ export class CryptoClient {
         const keyInfo = await client.getAccountData(keyAccountDataName);
         return SecretStorageKey.fromAccountData(key, keyAccountDataName, JSON.stringify(keyInfo));
     }
+
+    /**
+     * Enable backing up of room keys.
+     * @param {IKeyBackupInfoRetrieved} info The configuration for key backup behaviour,
+     * as returned by {@link MatrixClient#getKeyBackupVersion}.
+     * @returns {Promise<void>} Resolves once backups have been enabled.
+     */
+    @requiresReady()
+    public async enableKeyBackup(info: IKeyBackupInfoRetrieved): Promise<void> {
+        if (!this.engine.isBackupEnabled()) {
+            // Only add the listener if we didn't add it already
+            this.client.on("to_device.decrypted", this.onToDeviceMessage);
+        }
+        await this.engine.enableKeyBackup(info);
+        // Back up any pending keys now, but asynchronously
+        void this.engine.backupRoomKeys();
+    }
+
+    /**
+     * Disable backing up of room keys.
+     */
+    @requiresReady()
+    public async disableKeyBackup(): Promise<void> {
+        await this.engine.disableKeyBackup();
+        this.client.removeListener("to_device.decrypted", this.onToDeviceMessage);
+    }
+
+    private readonly onToDeviceMessage = (msg: IToDeviceMessage): void => {
+        if (msg.type === "m.room_key") {
+            this.engine.backupRoomKeys();
+        }
+    };
 }

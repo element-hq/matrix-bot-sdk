@@ -1,32 +1,13 @@
 import * as simple from "simple-mock";
 import HttpBackend from 'matrix-mock-request';
 
-import { EncryptedFile, MatrixClient, MembershipEvent, OTKAlgorithm, RoomEncryptionAlgorithm } from "../../src";
-import { createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
-
-export function bindNullEngine(http: HttpBackend) {
-    http.when("POST", "/keys/upload").respond(200, (path, obj) => {
-        expect(obj).toMatchObject({
-
-        });
-        return {
-            one_time_key_counts: {
-                // Enough to trick the OlmMachine into thinking it has enough keys
-                [OTKAlgorithm.Signed]: 1000,
-            },
-        };
-    });
-    // Some oddity with the rust-sdk bindings during setup
-    http.when("POST", "/keys/query").respond(200, (path, obj) => {
-        return {};
-    });
-}
+import { EncryptedFile, EncryptionAlgorithm, IOlmEncrypted, IToDeviceMessage, MatrixClient, MembershipEvent, OTKAlgorithm, RoomEncryptionAlgorithm } from "../../src";
+import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
 
 describe('CryptoClient', () => {
     it('should not have a device ID or be ready until prepared', () => testCryptoStores(async (cryptoStoreType) => {
         const userId = "@alice:example.org";
         const { client, http } = createTestClient(null, userId, cryptoStoreType);
-
         client.getWhoAmI = () => Promise.resolve({ user_id: userId, device_id: TEST_DEVICE_ID });
 
         expect(client.crypto).toBeDefined();
@@ -35,7 +16,7 @@ describe('CryptoClient', () => {
 
         bindNullEngine(http);
         await Promise.all([
-            client.crypto.prepare([]),
+            client.crypto.prepare(),
             http.flushAllExpected(),
         ]);
 
@@ -46,24 +27,17 @@ describe('CryptoClient', () => {
     describe('prepare', () => {
         it('should prepare the room tracker', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@alice:example.org";
-            const roomIds = ["!a:example.org", "!b:example.org"];
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             client.getWhoAmI = () => Promise.resolve({ user_id: userId, device_id: TEST_DEVICE_ID });
 
-            const prepareSpy = simple.stub().callFn((rids: string[]) => {
-                expect(rids).toBe(roomIds);
-                return Promise.resolve();
-            });
-
-            (<any>client.crypto).roomTracker.prepare = prepareSpy; // private member access
-
             bindNullEngine(http);
+            // Prepare first
             await Promise.all([
-                client.crypto.prepare(roomIds),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
-            expect(prepareSpy.callCount).toEqual(1);
+            expect(client.crypto.isReady).toBe(true);
         }));
 
         it('should use a stored device ID', () => testCryptoStores(async (cryptoStoreType) => {
@@ -71,17 +45,85 @@ describe('CryptoClient', () => {
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
+            const CORRECT_DEVICE = "new_device";
 
-            const whoamiSpy = simple.stub().callFn(() => Promise.resolve({ user_id: userId, device_id: "wrong" }));
+            const whoamiSpy = simple.stub().callFn(() => Promise.resolve({ user_id: userId, device_id: CORRECT_DEVICE }));
             client.getWhoAmI = whoamiSpy;
 
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
-            expect(whoamiSpy.callCount).toEqual(0);
-            expect(client.crypto.clientDeviceId).toEqual(TEST_DEVICE_ID);
+            // This should be called to check
+            expect(whoamiSpy.callCount).toEqual(1);
+            expect(client.crypto.clientDeviceId).toEqual(CORRECT_DEVICE);
+            expect(await client.cryptoStore.getDeviceId()).toEqual(CORRECT_DEVICE);
+        }));
+    });
+
+    describe('processSync', () => {
+        /**
+         * Helper class to be able to call {@link MatrixClient#processSync}, which is otherwise private.
+         */
+        interface ProcessSyncClient {
+            processSync: MatrixClient["processSync"];
+        }
+
+        it('should process encrypted to-device messages', () => testCryptoStores(async (cryptoStoreType) => {
+            const userId = "@alice:example.org";
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
+            const psClient = <ProcessSyncClient>(<any>client);
+
+            await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
+
+            const toDeviceMessage: IToDeviceMessage<IOlmEncrypted> = {
+                type: "m.room.encrypted",
+                sender: userId,
+                content: {
+                    algorithm: EncryptionAlgorithm.OlmV1Curve25519AesSha2,
+                    sender_key: "sender_curve25519_key",
+                    ciphertext: {
+                        ["device_curve25519_key"]: {
+                            type: 0,
+                            body: "encrypted_payload_base_64",
+                        },
+                    },
+                },
+            };
+            const sync = {
+                to_device: { events: [toDeviceMessage] },
+                device_unused_fallback_key_types: [OTKAlgorithm.Signed],
+                device_one_time_keys_count: {
+                    [OTKAlgorithm.Signed]: 12,
+                    [OTKAlgorithm.Unsigned]: 14,
+                },
+                device_lists: {
+                    changed: ["@bob:example.org"],
+                    left: ["@charlie:example.org"],
+                },
+            };
+
+            const toDeviceSpy = simple.stub().callFn((ev) => {
+                for (const prop in toDeviceMessage) {
+                    expect(ev).toHaveProperty(prop);
+                }
+            });
+            client.on("to_device.decrypted", toDeviceSpy);
+
+            bindNullEngine(http);
+            await Promise.all([
+                client.crypto.prepare(),
+                http.flushAllExpected(),
+            ]);
+
+            bindNullEngine(http);
+            await Promise.all([
+                psClient.processSync(sync),
+                http.flushAllExpected(),
+            ]);
+
+            expect(toDeviceSpy.callCount).toBe(1);
         }));
 
         it('should expose the device Ed25519 identity', () => testCryptoStores(async (cryptoStoreType) => {
@@ -91,7 +133,20 @@ describe('CryptoClient', () => {
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
+                http.flushAllExpected(),
+            ]);
+            expect(client.crypto.clientDeviceEd25519).toBeTruthy();
+        }));
+
+        it('should expose the device Ed25519 identity', () => testCryptoStores(async (cryptoStoreType) => {
+            const userId = "@alice:example.org";
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
+
+            await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
+            bindNullEngine(http);
+            await Promise.all([
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
             expect(client.crypto.clientDeviceEd25519).toBeTruthy();
@@ -104,7 +159,7 @@ describe('CryptoClient', () => {
             const { client } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
-            // await client.crypto.prepare([]); // deliberately commented
+            // await client.crypto.prepare(); // deliberately commented
 
             try {
                 await client.crypto.isRoomEncrypted("!new:example.org");
@@ -121,11 +176,11 @@ describe('CryptoClient', () => {
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
-            client.getRoomStateEvent = () => Promise.reject(new Error("not used"));
+            client.getRoomStateEventContent = () => Promise.reject(new Error("not used"));
 
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -138,11 +193,11 @@ describe('CryptoClient', () => {
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
-            client.getRoomStateEvent = () => Promise.reject(new Error("implied 404"));
+            client.getRoomStateEventContent = () => Promise.reject(new Error("implied 404"));
 
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -155,11 +210,11 @@ describe('CryptoClient', () => {
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
-            client.getRoomStateEvent = () => Promise.resolve({});
+            client.getRoomStateEventContent = () => Promise.resolve({});
 
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -172,11 +227,11 @@ describe('CryptoClient', () => {
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
-            client.getRoomStateEvent = () => Promise.resolve({ algorithm: RoomEncryptionAlgorithm.MegolmV1AesSha2 });
+            client.getRoomStateEventContent = () => Promise.resolve({ algorithm: RoomEncryptionAlgorithm.MegolmV1AesSha2 });
 
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -214,7 +269,7 @@ describe('CryptoClient', () => {
         it('should sign the object while retaining signatures without mutation', async () => {
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -271,7 +326,7 @@ describe('CryptoClient', () => {
         it('should fail in unencrypted rooms', async () => {
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -347,7 +402,7 @@ describe('CryptoClient', () => {
         it('should encrypt media', async () => {
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -433,7 +488,7 @@ describe('CryptoClient', () => {
         it('should be symmetrical', async () => {
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -458,7 +513,7 @@ describe('CryptoClient', () => {
         it('should decrypt', async () => {
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
 
@@ -488,7 +543,7 @@ describe('CryptoClient', () => {
             await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
             bindNullEngine(http);
             await Promise.all([
-                client.crypto.prepare([]),
+                client.crypto.prepare(),
                 http.flushAllExpected(),
             ]);
         }));
@@ -637,7 +692,7 @@ describe('CryptoClient', () => {
                 };
             });
             await Promise.all([
-                client1.crypto.prepare([]),
+                client1.crypto.prepare(),
                 http1.flushAllExpected(),
             ]);
 
@@ -726,7 +781,7 @@ describe('CryptoClient', () => {
                 };
             });
             await Promise.all([
-                client2.crypto.prepare([]),
+                client2.crypto.prepare(),
                 http2.flushAllExpected(),
             ]);
 

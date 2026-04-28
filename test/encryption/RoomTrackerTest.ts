@@ -1,8 +1,7 @@
 import * as simple from "simple-mock";
 
 import { EncryptionEventContent, MatrixClient, RoomEncryptionAlgorithm, RoomTracker } from "../../src";
-import { createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
-import { bindNullEngine } from "./CryptoClientTest";
+import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
 
 function prepareQueueSpies(
     client: MatrixClient,
@@ -32,7 +31,7 @@ function prepareQueueSpies(
 
     client.cryptoStore.getRoom = readSpy;
     client.cryptoStore.storeRoom = storeSpy;
-    client.getRoomStateEvent = stateSpy;
+    client.getRoomStateEventContent = stateSpy;
 
     return [readSpy, stateSpy, storeSpy];
 }
@@ -45,7 +44,7 @@ describe('RoomTracker', () => {
         await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
         bindNullEngine(http);
         await Promise.all([
-            client.crypto.prepare([]),
+            client.crypto.prepare(),
             http.flushAllExpected(),
         ]);
         (client.crypto as any).engine.addTrackedUsers = () => Promise.resolve();
@@ -73,7 +72,7 @@ describe('RoomTracker', () => {
         await client.cryptoStore.setDeviceId(TEST_DEVICE_ID);
         bindNullEngine(http);
         await Promise.all([
-            client.crypto.prepare([]),
+            client.crypto.prepare(),
             http.flushAllExpected(),
         ]);
 
@@ -103,24 +102,6 @@ describe('RoomTracker', () => {
         await new Promise<void>(resolve => setTimeout(() => resolve(), 250));
         expect(queueSpy.callCount).toEqual(1);
     }));
-
-    describe('prepare', () => {
-        it('should queue updates for rooms', async () => {
-            const roomIds = ["!a:example.org", "!b:example.org"];
-
-            const { client } = createTestClient();
-
-            const queueSpy = simple.stub().callFn((rid: string) => {
-                expect(rid).toEqual(roomIds[queueSpy.callCount - 1]);
-                return Promise.resolve();
-            });
-
-            const tracker = new RoomTracker(client);
-            tracker.queueRoomCheck = queueSpy;
-            await tracker.prepare(roomIds);
-            expect(queueSpy.callCount).toEqual(2);
-        });
-    });
 
     describe('queueRoomCheck', () => {
         it('should store unknown rooms', () => testCryptoStores(async (cryptoStoreType) => {
@@ -160,7 +141,7 @@ describe('RoomTracker', () => {
             const { client } = createTestClient(null, "@user:example.org", cryptoStoreType);
 
             const [readSpy, stateSpy, storeSpy] = prepareQueueSpies(client, roomId, content);
-            client.getRoomStateEvent = async (rid: string, et: string, sk: string) => {
+            client.getRoomStateEventContent = async (rid: string, et: string, sk: string) => {
                 await stateSpy(rid, et, sk);
                 throw new Error("Simulated 404");
             };

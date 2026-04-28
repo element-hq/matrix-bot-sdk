@@ -611,7 +611,7 @@ describe('IdentityClient', () => {
             };
 
             const stateStub = () => Promise.resolve(null);
-            client.matrixClient.getRoomStateEvent = stateStub;
+            client.matrixClient.getRoomStateEventContent = stateStub;
             client.matrixClient.getUserProfile = stateStub;
 
             http.when("POST", "/_matrix/identity/v2/store-invite").respond(200, (path, content) => {
@@ -677,7 +677,7 @@ describe('IdentityClient', () => {
                         throw new Error("Unknown event type");
                 }
             };
-            client.matrixClient.getRoomStateEvent = stateStub;
+            client.matrixClient.getRoomStateEventContent = stateStub;
             const profileSpy = simple.mock(client.matrixClient, "getUserProfile").callFn(() => {
                 return Promise.resolve({ displayname: senderDisplayName, avatar_url: senderAvatarUrl });
             });
@@ -752,7 +752,7 @@ describe('IdentityClient', () => {
                         throw new Error("Unknown event type");
                 }
             };
-            client.matrixClient.getRoomStateEvent = stateStub;
+            client.matrixClient.getRoomStateEventContent = stateStub;
             const profileSpy = simple.mock(client.matrixClient, "getUserProfile").callFn(() => {
                 return Promise.resolve({ displayname: senderDisplayName, avatar_url: senderAvatarUrl });
             });

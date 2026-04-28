@@ -1,11 +1,12 @@
 import * as tmp from "tmp";
 import * as simple from "simple-mock";
-import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import {
+    CreateEvent,
     EventKind,
     IJoinRoomStrategy,
     IPreprocessor,
+    IToDeviceMessage,
     MatrixClient,
     Membership,
     MemoryStorageProvider,
@@ -48,13 +49,13 @@ describe('MatrixClient', () => {
             expect(client.accessToken).toEqual(accessToken);
         });
 
-        it('should create a crypto client when requested', () => {
+        it('should create a crypto client when requested', () => testCryptoStores(async (cryptoStoreType) => {
             const homeserverUrl = "https://example.org";
             const accessToken = "example_token";
 
-            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name, StoreType.Sqlite));
+            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name, cryptoStoreType));
             expect(client.crypto).toBeDefined();
-        });
+        }));
 
         it('should NOT create a crypto client when requested', () => {
             const homeserverUrl = "https://example.org";
@@ -306,7 +307,7 @@ describe('MatrixClient', () => {
 
     describe('getServerVersions', () => {
         it('should call the right endpoint', async () => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
 
             const versionsResponse: ServerVersions = {
                 unstable_features: {
@@ -323,7 +324,7 @@ describe('MatrixClient', () => {
         });
 
         it('should cache the response', async () => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
 
             const versionsResponse: ServerVersions = {
                 unstable_features: {
@@ -359,7 +360,7 @@ describe('MatrixClient', () => {
             [{ "org.example.wrong": true }, "org.example.feature", false],
             [{ "org.example.wrong": false }, "org.example.feature", false],
         ])("should find that %p has %p as %p", async (versions, flag, target) => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
 
             const versionsResponse: ServerVersions = {
                 versions: ["v1.1"],
@@ -379,7 +380,7 @@ describe('MatrixClient', () => {
             [["v1.2"], "v1.1", false],
             [["v1.1", "v1.2", "v1.3"], "v1.2", true],
         ])("should find that %p has %p as %p", async (versions, version, target) => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
 
             const versionsResponse: ServerVersions = {
                 versions: versions,
@@ -398,7 +399,7 @@ describe('MatrixClient', () => {
             [["v1.3"], ["v1.1", "v1.2"], false],
             [["v1.1", "v1.2", "v1.3"], ["v1.2", "v1.3"], true],
         ])("should find that %p has %p as %p", async (versions, searchVersions, target) => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
 
             const versionsResponse: ServerVersions = {
                 versions: versions,
@@ -1044,7 +1045,7 @@ describe('MatrixClient', () => {
         });
 
         it('should request the user ID if it is not known', async () => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: false });
 
             const userId = "@example:example.org";
             const response = {
@@ -1062,7 +1063,7 @@ describe('MatrixClient', () => {
 
     describe('getWhoAmI', () => {
         it('should call the right endpoint', async () => {
-            const { client, http } = createTestClient();
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: false });
 
             const response = {
                 user_id: "@user:example.org",
@@ -1401,8 +1402,7 @@ describe('MatrixClient', () => {
     describe('processSync', () => {
         interface ProcessSyncClient {
             userId: string;
-
-            processSync(raw: any): Promise<any>;
+            processSync(raw: any): MatrixClient["processSync"];
         }
 
         it('should process non-room account data', async () => {
@@ -2323,6 +2323,23 @@ describe('MatrixClient', () => {
             await client.processSync(sync);
             expect(spy.callCount).toBe(1);
         }));
+
+        it('should process to-device messages regardless of crypto', async () => {
+            const { client: realClient } = createTestClient();
+            const client = <ProcessSyncClient>(<any>realClient);
+
+            const sync = {
+                to_device: { events: [{ type: "org.example", content: { hello: "world" } }] },
+            };
+
+            const spy = simple.stub().callFn((toDeviceMsg: IToDeviceMessage) => {
+                expect(toDeviceMsg).toMatchObject(sync.to_device.events[0]);
+            });
+            realClient.on("to-device", spy);
+
+            await client.processSync(sync);
+            expect(spy.callCount).toBe(1);
+        });
     });
 
     describe('getEvent', () => {
@@ -2367,7 +2384,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
-            expect(result["processed"]).toBeTruthy();
+            expect(result.raw["processed"]).toBeTruthy();
         });
 
         it('should try decryption', () => testCryptoStores(async (cryptoStoreType) => {
@@ -2605,31 +2622,58 @@ describe('MatrixClient', () => {
         });
     });
 
-    describe('getRoomStateEvent', () => {
-        it('should call the right endpoint with no state key', async () => {
+    describe('getRoomStateEventContent', () => {
+        const event = { name: "My name" };
+        const eventType = "m.room.name";
+        const roomId = "!abc123:example.org";
+        const stateKey = "testing";
+        it('should call the right endpoint with an empty state key', async () => {
             const { client, http, hsUrl } = createTestClient();
-
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, ""), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
         });
 
         it('should call the right endpoint with a state key', async () => {
             const { client, http, hsUrl } = createTestClient();
 
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-            const stateKey = "testing";
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
+                return event;
+            });
+
+            const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            expect(result).toMatchObject(event);
+        });
+    });
+
+    describe('getRoomStateEventBody', () => {
+        const eventType = "m.room.name";
+        const stateKey = "testing";
+        const roomId = "!abc123:example.org";
+        const event = { roomId, type: eventType, content: { name: "My name" }, state_key: stateKey };
+        it('should call the right endpoint with an empty state key', async () => {
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
+                return event;
+            });
+
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
+            expect(result).toMatchObject(event);
+        });
+
+        it('should call the right endpoint with a state key', async () => {
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
             // noinspection TypeScriptValidateJSTypes
             http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
@@ -2637,22 +2681,20 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
         });
 
         it('should process events with no state key', async () => {
-            const { client, http, hsUrl } = createTestClient();
+            const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
             const processor = <IPreprocessor>{
                 processEvent: (ev, procClient, kind?) => {
                     expect(kind).toEqual(EventKind.RoomEvent);
                     ev["processed"] = true;
                 },
-                getSupportedEventTypes: () => ["m.room.message"],
+                getSupportedEventTypes: () => [eventType],
             };
 
             client.addPreprocessor(processor);
@@ -2663,37 +2705,22 @@ describe('MatrixClient', () => {
                 return event;
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, ""), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
             expect(result["processed"]).toBeTruthy();
         });
 
-        it('should process events with a state key', async () => {
-            const { client, http, hsUrl } = createTestClient();
-
-            const roomId = "!abc123:example.org";
-            const eventType = "m.room.message";
-            const event = { type: "m.room.message" };
-            const stateKey = "testing";
-            const processor = <IPreprocessor>{
-                processEvent: (ev, procClient, kind?) => {
-                    expect(kind).toEqual(EventKind.RoomEvent);
-                    ev["processed"] = true;
-                },
-                getSupportedEventTypes: () => ["m.room.message"],
-            };
-
-            client.addPreprocessor(processor);
+        it('should call the fallback endpoint with a state key', async () => {
+            const { client, http } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
+            http.when("GET", "/_matrix/client/versions").respond(200, { versions: [] } satisfies ServerVersions);
 
             // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
-                return event;
+            http.when("GET", `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`).respond(200, () => {
+                return [event];
             });
 
-            const [result] = await Promise.all([client.getRoomStateEvent(roomId, eventType, stateKey), http.flushAllExpected()]);
+            const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
-            expect(result["processed"]).toBeTruthy();
         });
     });
 
@@ -2756,6 +2783,34 @@ describe('MatrixClient', () => {
             expect(result.state[0].raw).toMatchObject(state[0]);
             expect(result.state[1]).toBeDefined();
             expect(result.state[1].raw).toMatchObject(state[1]);
+        });
+    });
+
+    describe('getEventNearestToTimestamp', () => {
+        it('should use the right endpoint', async () => {
+            const { client, http, hsUrl } = createTestClient();
+            const roomId = "!abc123:example.org";
+            const dir = "f";
+            const timestamp = 1234;
+
+            const eventId = "$def456:example.org";
+            const originServerTs = 4567;
+
+            http.when("GET", "/_matrix/client/v1/rooms").respond(200, (path, _content, req) => {
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/timestamp_to_event`);
+                expect(req.queryParams['dir']).toEqual(dir);
+                expect(req.queryParams['ts']).toEqual(timestamp);
+
+                return {
+                    event_id: eventId,
+                    origin_server_ts: originServerTs,
+                };
+            });
+
+            const [result] = await Promise.all([client.getEventNearestToTimestamp(roomId, timestamp, dir), http.flushAllExpected()]);
+            expect(result).toBeDefined();
+            expect(result.event_id).toEqual(eventId);
+            expect(result.origin_server_ts).toEqual(originServerTs);
         });
     });
 
@@ -4761,7 +4816,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -4791,7 +4846,7 @@ describe('MatrixClient', () => {
                 ban: 100,
             };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -4813,48 +4868,44 @@ describe('MatrixClient', () => {
     });
 
     describe('userHasPowerLevelFor', () => {
-        it('throws when a power level event cannot be located', async () => {
-            const { client } = createTestClient();
+        let client;
+        beforeEach(() => {
+            client = createTestClient().client;
+            simple.mock(client, "getRoomCreateEvent").callFn(() => {
+                return new CreateEvent({ sender: "@creator:example.org" });
+            });
+        });
 
+        it('does not throw when a power level event cannot be located for regular events', async () => {
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
                 return null;
             });
 
-            try {
-                await client.userHasPowerLevelFor(userId, roomId, eventType, isState);
-
-                // noinspection ExceptionCaughtLocallyJS
-                throw new Error("Expected call to fail");
-            } catch (e) {
-                expect(e.message).toEqual("No power level event found");
-            }
+            expect(await client.userHasPowerLevelFor(userId, roomId, eventType, isState)).toBeTruthy();
             expect(getStateEventSpy.callCount).toBe(1);
         });
 
         it('assumes PL50 for state events when no power level information is available', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = true;
             const plEvent = { users: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
                 return plEvent;
             });
-
             let result;
 
             plEvent.users[userId] = 50;
@@ -4874,15 +4925,13 @@ describe('MatrixClient', () => {
         });
 
         it('assumes PL0 for non-state events when no power level information is available', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { users: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -4913,15 +4962,13 @@ describe('MatrixClient', () => {
         });
 
         it('uses the state_default parameter', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = true;
             const plEvent = { state_default: 75, events_default: 99, users: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -4947,15 +4994,13 @@ describe('MatrixClient', () => {
         });
 
         it('uses the events_default parameter', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { state_default: 99, events_default: 75, users: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -4981,15 +5026,13 @@ describe('MatrixClient', () => {
         });
 
         it('uses the users_default parameter', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { events_default: 75, users_default: 15 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5009,8 +5052,6 @@ describe('MatrixClient', () => {
         });
 
         it('uses the events[event_type] parameter for non-state events', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
@@ -5018,7 +5059,7 @@ describe('MatrixClient', () => {
             const plEvent = { state_default: 99, events_default: 99, events: {}, users: {} };
             plEvent["events"][eventType] = 75;
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5044,8 +5085,6 @@ describe('MatrixClient', () => {
         });
 
         it('uses the events[event_type] parameter for state events', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
@@ -5053,7 +5092,7 @@ describe('MatrixClient', () => {
             const plEvent = { state_default: 99, events_default: 99, events: {}, users: {} };
             plEvent["events"][eventType] = 75;
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5079,8 +5118,6 @@ describe('MatrixClient', () => {
         });
 
         it('uses the events[event_type] parameter safely', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
@@ -5088,7 +5125,7 @@ describe('MatrixClient', () => {
             const plEvent = { state_default: 99, events_default: 75, events: {}, users: {} };
             plEvent["events"][eventType + "_wrong"] = 99;
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5114,15 +5151,13 @@ describe('MatrixClient', () => {
         });
 
         it('defaults the user to PL0', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { events: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5148,15 +5183,13 @@ describe('MatrixClient', () => {
         });
 
         it('defaults the user to PL0 safely', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { events: {}, users: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5182,15 +5215,13 @@ describe('MatrixClient', () => {
         });
 
         it('rejects string power levels', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const eventType = "m.room.message";
             const isState = false;
             const plEvent = { events: { [eventType]: "10" }, users_default: 0 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5201,45 +5232,15 @@ describe('MatrixClient', () => {
             expect(result).toBe(true);
             expect(getStateEventSpy.callCount).toBe(1);
         });
-    });
-
-    describe('userHasPowerLevelFor', () => {
-        it('throws when a power level event cannot be located', async () => {
-            const { client } = createTestClient();
-
-            const roomId = "!testing:example.org";
-            const userId = "@testing:example.org";
-            const eventType = "m.room.message";
-            const isState = false;
-
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
-                expect(rid).toEqual(roomId);
-                expect(evType).toEqual("m.room.power_levels");
-                expect(stateKey).toEqual("");
-                return null;
-            });
-
-            try {
-                await client.userHasPowerLevelFor(userId, roomId, eventType, isState);
-
-                // noinspection ExceptionCaughtLocallyJS
-                throw new Error("Expected call to fail");
-            } catch (e) {
-                expect(e.message).toEqual("No power level event found");
-            }
-            expect(getStateEventSpy.callCount).toBe(1);
-        });
 
         // Doubles as a test to ensure the right action is used
         it('uses the users_default parameter', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.Ban;
             const plEvent = { [action]: 75, users_default: 15 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5259,14 +5260,12 @@ describe('MatrixClient', () => {
         });
 
         it('should work with @room notifications', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.NotifyRoom;
             const plEvent = { notifications: { room: 75 }, users_default: 15 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5286,14 +5285,12 @@ describe('MatrixClient', () => {
         });
 
         it('should work with @room notifications when `notifications` is missing', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.NotifyRoom;
             const plEvent = { users_default: 15 }; // deliberately left out action level
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5306,14 +5303,12 @@ describe('MatrixClient', () => {
         });
 
         it('defaults the user to PL0', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.Ban;
             const plEvent = { events: {} };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5339,14 +5334,12 @@ describe('MatrixClient', () => {
         });
 
         it('defaults the user to PL0 safely', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.Ban;
             const plEvent = { events: {}, users: {}, [action]: 50 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5372,14 +5365,12 @@ describe('MatrixClient', () => {
         });
 
         it('rejects string power levels', async () => {
-            const { client } = createTestClient();
-
             const roomId = "!testing:example.org";
             const userId = "@testing:example.org";
             const action = PowerLevelAction.Ban;
             const plEvent = { [action]: "40", users_default: 45 };
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5400,33 +5391,33 @@ describe('MatrixClient', () => {
     });
 
     describe('calculatePowerLevelChangeBoundsOn', () => {
-        it('throws when a power level event cannot be located', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
+        let client: MatrixClient;
+        beforeEach(() => {
+            client = createTestClient(null, '@testing:example.org').client;
+            simple.mock(client, "getRoomCreateEvent").callFn(() => {
+                return new CreateEvent({ sender: "@creator:example.org" });
+            });
+        });
 
+        it('does not throw when a power level event cannot be located', async () => {
             const roomId = "!testing:example.org";
             const userId = await client.getUserId();
 
-            const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
                 return null;
             });
 
-            try {
-                await client.calculatePowerLevelChangeBoundsOn(userId, roomId);
-
-                // noinspection ExceptionCaughtLocallyJS
-                throw new Error("Expected call to fail");
-            } catch (e) {
-                expect(e.message).toEqual("No power level event found");
-            }
+            expect(await client.calculatePowerLevelChangeBoundsOn(userId, roomId)).toEqual({
+                canModify: false,
+                maximumPossibleLevel: 0,
+            });
             expect(getStateEventSpy.callCount).toBe(1);
         });
 
         it('allows moderators to demote themselves', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = await client.getUserId();
             const plEvent = {
@@ -5436,7 +5427,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5450,8 +5441,6 @@ describe('MatrixClient', () => {
         });
 
         it('allows admins to demote themselves', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = await client.getUserId();
             const plEvent = {
@@ -5461,7 +5450,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5475,8 +5464,6 @@ describe('MatrixClient', () => {
         });
 
         it('denies moderators from promoting themselves', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = await client.getUserId();
             const plEvent = {
@@ -5486,7 +5473,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5500,8 +5487,6 @@ describe('MatrixClient', () => {
         });
 
         it('prevents users from promoting above themselves', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = "@another:example.org";
             const userLevel = 40;
@@ -5514,7 +5499,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5528,8 +5513,6 @@ describe('MatrixClient', () => {
         });
 
         it('allows users to promote up to their power level', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = "@another:example.org";
             const userLevel = 60;
@@ -5542,7 +5525,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5556,8 +5539,6 @@ describe('MatrixClient', () => {
         });
 
         it('denies modification for exactly the same level', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = "@another:example.org";
             const userLevel = 50;
@@ -5570,7 +5551,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5584,8 +5565,6 @@ describe('MatrixClient', () => {
         });
 
         it('denies modification if the state event is too high of power', async () => {
-            const { client } = createTestClient(null, '@testing:example.org');
-
             const roomId = "!testing:example.org";
             const targetUserId = "@another:example.org";
             const userLevel = 50;
@@ -5598,7 +5577,7 @@ describe('MatrixClient', () => {
                 },
             };
 
-            simple.mock(client, "getRoomStateEvent").callFn((rid, evType, stateKey) => {
+            simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
@@ -5620,8 +5599,8 @@ describe('MatrixClient', () => {
             const mediaId = "testing/val";
             const mxc = `mxc://${domain}/${mediaId}`;
 
-            const http = client.mxcToHttp(mxc);
-            expect(http).toBe(`${hsUrl}/_matrix/media/v3/download/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`);
+            const http = await client.mxcToHttp(mxc);
+            expect(http).toBe(`${hsUrl}/_matrix/client/v1/media/download/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`);
         });
 
         it('should error for non-MXC URIs', async () => {
@@ -5632,7 +5611,7 @@ describe('MatrixClient', () => {
             const mxc = `https://${domain}/${mediaId}`;
 
             try {
-                client.mxcToHttp(mxc);
+                await client.mxcToHttp(mxc);
 
                 // noinspection ExceptionCaughtLocallyJS
                 throw new Error("Expected an error and didn't get one");
@@ -5653,9 +5632,9 @@ describe('MatrixClient', () => {
             const method = "scale";
             const mxc = `mxc://${domain}/${mediaId}`;
 
-            const http = client.mxcToHttpThumbnail(mxc, width, height, method);
+            const http = await client.mxcToHttpThumbnail(mxc, width, height, method);
             // eslint-disable-next-line max-len
-            expect(http).toBe(`${hsUrl}/_matrix/media/v3/thumbnail/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}?width=${width}&height=${height}&method=${encodeURIComponent(method)}`);
+            expect(http).toBe(`${hsUrl}/_matrix/client/v1/media/thumbnail/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}?width=${width}&height=${height}&method=${encodeURIComponent(method)}`);
         });
 
         it('should error for non-MXC URIs', async () => {
@@ -5669,7 +5648,7 @@ describe('MatrixClient', () => {
             const mxc = `https://${domain}/${mediaId}`;
 
             try {
-                client.mxcToHttpThumbnail(mxc, width, height, method);
+                await client.mxcToHttpThumbnail(mxc, width, height, method);
 
                 // noinspection ExceptionCaughtLocallyJS
                 throw new Error("Expected an error and didn't get one");
@@ -5783,6 +5762,24 @@ describe('MatrixClient', () => {
             const [result] = await Promise.all([client.uploadContentFromUrl(`${hsUrl}/sample/download`), http.flushAllExpected()]);
             expect(result).toEqual(uri);
         });
+    });
+
+    describe('upgradeRoom', () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
+            const userId = "@test:example.org";
+            const oldRoomId = "!myfakeroom";
+            const newRoomId = "!new-room-id";
+            const newRoomVersion = "any-ver";
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
+
+            http.when("POST", `/_matrix/client/v3/rooms/${encodeURIComponent(oldRoomId)}/upgrade`).respond(200, (path, content) => {
+                expect(content).toMatchObject({ new_version: newRoomVersion });
+                return { replacement_room: newRoomId };
+            });
+
+            const [result] = await Promise.all([client.upgradeRoom(oldRoomId, newRoomVersion), http.flushAllExpected()]);
+            expect(result).toEqual(newRoomId);
+        }));
     });
 
     describe('getRoomUpgradeHistory', () => {
@@ -6675,7 +6672,7 @@ describe('MatrixClient', () => {
                     type: 'm.space',
                 };
             });
-            client.getRoomStateEvent = stateSpy;
+            client.getRoomStateEventContent = stateSpy;
 
             const result = await client.getSpace(roomAlias);
             expect(resolveSpy.callCount).toBe(1);
@@ -6704,7 +6701,7 @@ describe('MatrixClient', () => {
                     'type': 'fibble',
                 };
             });
-            client.getRoomStateEvent = stateSpy;
+            client.getRoomStateEventContent = stateSpy;
 
             try {
                 await client.getSpace(roomId);

@@ -12,7 +12,7 @@ describe('ProfileCache', () => {
 
         const { client } = createTestClient();
 
-        const getStateEventSpy = simple.mock(client, "getRoomStateEvent").callFn((rid, type, stateKey) => {
+        const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, type, stateKey) => {
             expect(rid).toBe(roomId);
             expect(type).toBe("m.room.member");
             expect(stateKey).toBe(userId);
@@ -68,7 +68,7 @@ describe('ProfileCache', () => {
         const { client: client1 } = createTestClient();
         const { client: client2 } = createTestClient();
 
-        const getStateEventSpy1 = simple.mock(client1, "getRoomStateEvent").callFn((rid, type, stateKey) => {
+        const getStateEventSpy1 = simple.mock(client1, "getRoomStateEventContent").callFn((rid, type, stateKey) => {
             expect(rid).toBe(roomId);
             expect(type).toBe("m.room.member");
             expect(stateKey).toBe(userId);
@@ -79,7 +79,7 @@ describe('ProfileCache', () => {
             return Promise.resolve(generalProfile);
         });
 
-        const getStateEventSpy2 = simple.mock(client2, "getRoomStateEvent").callFn((rid, type, stateKey) => {
+        const getStateEventSpy2 = simple.mock(client2, "getRoomStateEventContent").callFn((rid, type, stateKey) => {
             expect(rid).toBe(roomId);
             expect(type).toBe("m.room.member");
             expect(stateKey).toBe(userId);
@@ -177,10 +177,11 @@ describe('ProfileCache', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
 
-        const getStateEventSpy1 = simple.mock(client1, "getRoomStateEvent").callFn((rid, type, stateKey) => {
+        const getStateEventSpy1 = simple.mock(client1, "getRoomStateEventContent").callFn((rid, type, stateKey) => {
             expect(rid).toBe(roomId);
             expect(type).toBe("m.room.member");
             expect(stateKey).toBe(userId);
@@ -191,7 +192,7 @@ describe('ProfileCache', () => {
             return Promise.resolve(generalProfile);
         });
 
-        const getStateEventSpy2 = simple.mock(client2, "getRoomStateEvent").callFn((rid, type, stateKey) => {
+        const getStateEventSpy2 = simple.mock(client2, "getRoomStateEventContent").callFn((rid, type, stateKey) => {
             expect(rid).toBe(roomId);
             expect(type).toBe("m.room.member");
             expect(stateKey).toBe(userId);

@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { htmlEncode } from "htmlencode";
 import { htmlToText } from "html-to-text";
+import { LRUCache } from "lru-cache";
 
 import { IStorageProvider } from "./storage/IStorageProvider";
 import { MemoryStorageProvider } from "./storage/MemoryStorageProvider";
@@ -15,15 +16,13 @@ import { timedMatrixClientFunctionCall } from "./metrics/decorators";
 import { AdminApis } from "./AdminApis";
 import { Presence } from "./models/Presence";
 import { Membership, MembershipEvent } from "./models/events/MembershipEvent";
-import { RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
+import { APIRoomEvent, APIRoomStateEvent, RoomEvent, RoomEventContent, StateEvent } from "./models/events/RoomEvent";
 import { EventContext } from "./models/EventContext";
-import { PowerLevelBounds } from "./models/PowerLevelBounds";
 import { EventKind } from "./models/events/EventKind";
 import { IdentityClient } from "./identity/IdentityClient";
 import { OpenIDConnectToken } from "./models/OpenIDConnect";
-import { doHttpRequest } from "./http";
+import { doHttpRequest, DoHttpRequestOpts } from "./http";
 import { Space, SpaceCreateOptions } from "./models/Spaces";
-import { PowerLevelAction } from "./models/PowerLevelAction";
 import { CryptoClient } from "./e2ee/CryptoClient";
 import {
     FallbackKey,
@@ -44,10 +43,20 @@ import { DMs } from "./DMs";
 import { ServerVersions } from "./models/ServerVersions";
 import { RoomCreateOptions } from "./models/CreateRoom";
 import { PresenceState } from './models/events/PresenceEvent';
+import { IKeyBackupInfo, IKeyBackupInfoRetrieved, IKeyBackupInfoUnsigned, IKeyBackupInfoUpdate, IKeyBackupVersion, KeyBackupVersion } from "./models/KeyBackup";
+import { MatrixError } from "./models/MatrixError";
+import { MXCUrl } from "./models/MXCUrl";
+import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
+import { MatrixCapabilities } from "./models/Capabilities";
+import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
+import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
+import { IJsonType, Json } from "./helpers/Types";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
 const VERSIONS_CACHE_MS = 7200000; // 2 hours
+const CAPABILITES_CACHE_MS = 7200000; // 2 hours
+const CREATE_EVENT_CACHE_SIZE = 256;
 
 /**
  * A client that is capable of interacting with a matrix homeserver.
@@ -78,6 +87,13 @@ export class MatrixClient extends EventEmitter {
     public readonly crypto: CryptoClient;
 
     /**
+     * The Content Scanner API instance for this client. This is set if `opts.enableContentScanner`
+     * is true. The `downloadContent` and `crypto.decryptMedia` methods automatically go via
+     * the content scanner when this is set.
+     */
+    public readonly contentScannerInstance?: MatrixContentScannerClient;
+
+    /**
      * The DM manager instance for this client.
      */
     public readonly dms: DMs;
@@ -92,9 +108,12 @@ export class MatrixClient extends EventEmitter {
     private filterId = 0;
     private stopSyncing = false;
     private metricsInstance: Metrics = new Metrics();
-    private unstableApisInstance = new UnstableApis(this);
+    private readonly unstableApisInstance = new UnstableApis(this);
     private cachedVersions: ServerVersions;
     private versionsLastFetched = 0;
+    private cachedCapabilites: MatrixCapabilities;
+    private capabilitesLastFetched = 0;
+    private createEventCache = new LRUCache<string, CreateEvent>({ max: CREATE_EVENT_CACHE_SIZE });
 
     /**
      * Set this to true to have the client only persist the sync token after the sync
@@ -116,6 +135,7 @@ export class MatrixClient extends EventEmitter {
         public readonly accessToken: string,
         private storage: IStorageProvider = null,
         public readonly cryptoStore: ICryptoStorageProvider = null,
+        opts: { enableContentScanner?: boolean } = {},
     ) {
         super();
 
@@ -140,13 +160,15 @@ export class MatrixClient extends EventEmitter {
                 this.crypto.onRoomJoin(roomId);
             });
             LogService.debug("MatrixClientLite", "End-to-end encryption client created");
-        } else {
-            // LogService.trace("MatrixClientLite", "Not setting up encryption");
         }
 
         if (!this.storage) this.storage = new MemoryStorageProvider();
 
         this.dms = new DMs(this);
+
+        if (opts.enableContentScanner) {
+            this.contentScannerInstance = new MatrixContentScannerClient(this);
+        }
     }
 
     /**
@@ -259,6 +281,20 @@ export class MatrixClient extends EventEmitter {
         }
 
         return event;
+    }
+
+    /**
+     * Get the set of capabilites for the authenticated client.
+     * @returns {Promise<MatrixCapabilities>} Resolves to the server's supported versions.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getCapabilities(): Promise<MatrixCapabilities> {
+        if (!this.cachedCapabilites || (Date.now() - this.capabilitesLastFetched) >= CAPABILITES_CACHE_MS) {
+            this.cachedCapabilites = (await this.doRequest("GET", "/_matrix/client/v3/capabilities")).capabilities;
+            this.capabilitesLastFetched = Date.now();
+        }
+
+        return this.cachedCapabilites;
     }
 
     /**
@@ -451,7 +487,7 @@ export class MatrixClient extends EventEmitter {
     public async getPublishedAlias(roomIdOrAlias: string): Promise<string> {
         try {
             const roomId = await this.resolveRoom(roomIdOrAlias);
-            const event = await this.getRoomStateEvent(roomId, "m.room.canonical_alias", "");
+            const event = await this.getRoomStateEventContent(roomId, "m.room.canonical_alias", "");
             if (!event) return null;
 
             const canonical = event['alias'];
@@ -654,7 +690,7 @@ export class MatrixClient extends EventEmitter {
 
         if (this.crypto) {
             LogService.debug("MatrixClientLite", "Preparing end-to-end encryption");
-            await this.crypto.prepare(this.lastJoinedRoomIds);
+            await this.crypto.prepare();
             LogService.info("MatrixClientLite", "End-to-end encryption enabled");
         }
 
@@ -761,13 +797,15 @@ export class MatrixClient extends EventEmitter {
 
         if (!raw) return; // nothing to process
 
-        if (this.crypto) {
-            const inbox: IToDeviceMessage[] = [];
-            if (raw['to_device']?.['events']) {
-                inbox.push(...raw['to_device']['events']);
-                // TODO: Emit or do something with unknown messages?
-            }
+        const inbox: IToDeviceMessage[] = [];
+        if (raw['to_device']?.['events']) {
+            inbox.push(...raw['to_device']['events']);
+        }
+        for (const message of inbox) {
+            this.emit("to-device", message);
+        }
 
+        if (this.crypto) {
             let unusedFallbacks: OTKAlgorithm[] = [];
             if (raw['org.matrix.msc2732.device_unused_fallback_key_types']) {
                 unusedFallbacks = raw['org.matrix.msc2732.device_unused_fallback_key_types'];
@@ -917,12 +955,12 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public async getEvent(roomId: string, eventId: string): Promise<any> {
+    public async getEvent(roomId: string, eventId: string): Promise<RoomEvent<IJsonType>> {
         const event = await this.getRawEvent(roomId, eventId);
         if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
             return this.processEvent((await this.crypto.decryptRoomEvent(new EncryptedRoomEvent(event), roomId)).raw);
         }
-        return event;
+        return new RoomEvent<IJsonType>(event);
     }
 
     /**
@@ -932,7 +970,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} resolves to the found event
      */
     @timedMatrixClientFunctionCall()
-    public getRawEvent(roomId: string, eventId: string): Promise<any> {
+    public getRawEvent(roomId: string, eventId: string): Promise<APIRoomEvent> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/event/" + encodeURIComponent(eventId))
             .then(ev => this.processEvent(ev));
     }
@@ -943,7 +981,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any[]>} resolves to the room's state
      */
     @timedMatrixClientFunctionCall()
-    public getRoomState(roomId: string): Promise<any[]> {
+    public getRoomState(roomId: string): Promise<APIRoomStateEvent[]> {
         return this.doRequest("GET", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state")
             .then(state => Promise.all(state.map(ev => this.processEvent(ev))));
     }
@@ -954,28 +992,76 @@ export class MatrixClient extends EventEmitter {
      * @param {string} type the event type
      * @param {String} stateKey the state key, falsey if not needed
      * @returns {Promise<any|any[]>} resolves to the state event(s)
-     * @deprecated It is not possible to get an array of events - use getRoomStateEvent instead
+     * @deprecated It is not possible to get an array of events - use getRoomStateEventContent instead
      */
     @timedMatrixClientFunctionCall()
     public getRoomStateEvents(roomId, type, stateKey): Promise<any | any[]> {
-        return this.getRoomStateEvent(roomId, type, stateKey);
+        return this.getRoomStateEventContent(roomId, type, stateKey);
     }
 
     /**
      * Gets a state event for a given room of a given type under the given state key.
-     * @param {string} roomId the room ID
-     * @param {string} type the event type
-     * @param {String} stateKey the state key
-     * @returns {Promise<any>} resolves to the state event
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event
+     * @throws If the event could not be found or you do not have access to the room.
+     * @deprecated Use {@link getRoomStateEventContent} instead.
      */
     @timedMatrixClientFunctionCall()
-    public getRoomStateEvent(roomId, type, stateKey): Promise<any> {
+    public getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<any> {
         const path = "/_matrix/client/v3/rooms/"
             + encodeURIComponent(roomId) + "/state/"
             + encodeURIComponent(type) + "/"
             + encodeURIComponent(stateKey ? stateKey : '');
         return this.doRequest("GET", path)
             .then(ev => this.processEvent(ev));
+    }
+
+    /**
+     * Gets a state event's `content` for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key.
+     * @returns resolves to the state event content
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getRoomStateEventContent(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent["content"]> {
+        const path = "/_matrix/client/v3/rooms/"
+            + encodeURIComponent(roomId) + "/state/"
+            + encodeURIComponent(type) + "/"
+            + encodeURIComponent(stateKey);
+        const data = await this.doRequest("GET", path);
+        return data;
+    }
+
+    /**
+     * Gets a state event's full event body for a given room of a given type under the given state key.
+     * @param roomId the room ID
+     * @param type the event type
+     * @param stateKey the state key
+     * @returns resolves to the state event body
+     * @throws If the event could not be found or you do not have access to the room.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getRoomStateEventBody(roomId: string, type: string, stateKey: string): Promise<APIRoomStateEvent> {
+        // https://spec.matrix.org/unstable/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey
+        if (await this.doesServerSupportVersion("v1.16")) {
+            const path = "/_matrix/client/v3/rooms/"
+                + encodeURIComponent(roomId) + "/state/"
+                + encodeURIComponent(type) + "/"
+                + encodeURIComponent(stateKey);
+            const data = await this.doRequest("GET", path, { format: "event" });
+            return this.processEvent(data);
+        }
+        // Compatability with older implementations.
+        const eventRaw = (await this.getRoomState(roomId)).find(ev => ev.type === type && ev.state_key === stateKey);
+        if (!eventRaw) {
+            // To ensure compatibility, throw a not found error.
+            throw new MatrixError({ errcode: 'M_NOT_FOUND', error: 'Could not find state event in full room state (SDK Error).' }, 404, {});
+        }
+        return this.processEvent(eventRaw);
     }
 
     /**
@@ -994,6 +1080,18 @@ export class MatrixClient extends EventEmitter {
             after: res['events_after'].map(e => new RoomEvent<RoomEventContent>(e)),
             state: res['state'].map(e => new StateEvent<RoomEventContent>(e)),
         };
+    }
+
+    /**
+     * Get the nearest event to a given timestamp, either forwards or backwards.
+     * @param roomId The room ID to get the context in.
+     * @param ts The event ID to get the context of.
+     * @param dir The maximum number of events to return on either side of the event.
+     * @returns The ID and origin server timestamp of the event.
+     */
+    @timedMatrixClientFunctionCall()
+    public async getEventNearestToTimestamp(roomId: string, ts: number, dir: "f"|"b"): Promise<{event_id: string, origin_server_ts: number}> {
+        return await this.doRequest("GET", "/_matrix/client/v1/rooms/" + encodeURIComponent(roomId) + "/timestamp_to_event", { ts, dir });
     }
 
     /**
@@ -1446,32 +1544,44 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
+     * Get the m.room.create event for a room, using the cached value if stored by the client.
+     * @param roomId The room ID
+     * @returns A create event.
+     * @throws If the room does not exist, or you are not able to access the room.
+     */
+    public async getRoomCreateEvent(roomId: string): Promise<CreateEvent> {
+        // Create events are immutable in a room so we can safely cache this forever.
+        const existing = this.createEventCache.get(roomId);
+        if (existing) {
+            return existing;
+        }
+        const createEventRaw = await this.getRoomStateEventBody(roomId, "m.room.create", "");
+        const createEvent = new CreateEvent(createEventRaw);
+        this.createEventCache.set(roomId, createEvent);
+        return createEvent;
+    }
+
+    /**
      * Checks if a given user has a required power level required to send the given event.
-     * @param {string} userId the user ID to check the power level of
-     * @param {string} roomId the room ID to check the power level in
-     * @param {string} eventType the event type to look for in the `events` property of the power levels
-     * @param {boolean} isState true to indicate the event is intended to be a state event
-     * @returns {Promise<boolean>} resolves to true if the user has the required power level, resolves to false otherwise
+     * @param userId the user ID to check the power level of
+     * @param roomId the room ID to check the power level in
+     * @param eventType the event type to look for in the `events` property of the power levels
+     * @param isState true to indicate the event is intended to be a state event
+     * @returns resolves to true if the user has the required power level, resolves to false otherwise
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelFor(userId: string, roomId: string, eventType: string, isState: boolean): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
         let requiredPower = isState ? 50 : 0;
-        if (isState && Number.isFinite(powerLevelsEvent["state_default"])) requiredPower = powerLevelsEvent["state_default"];
-        if (!isState && Number.isFinite(powerLevelsEvent["events_default"])) requiredPower = powerLevelsEvent["events_default"];
-        if (Number.isFinite(powerLevelsEvent["events"]?.[eventType])) requiredPower = powerLevelsEvent["events"][eventType];
+        if (isState && Number.isFinite(pls.currentPL["state_default"])) requiredPower = pls.currentPL["state_default"];
+        if (!isState && Number.isFinite(pls.currentPL["events_default"])) requiredPower = pls.currentPL["events_default"];
+        if (Number.isFinite(pls.currentPL["events"]?.[eventType])) requiredPower = pls.currentPL["events"][eventType];
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1483,12 +1593,10 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async userHasPowerLevelForAction(userId: string, roomId: string, action: PowerLevelAction): Promise<boolean> {
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            // This is technically supposed to be non-fatal, but it's pretty unreasonable for a room to be missing
-            // power levels.
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
         const defaultForActions: { [A in PowerLevelAction]: number } = {
             [PowerLevelAction.Ban]: 50,
@@ -1500,15 +1608,15 @@ export class MatrixClient extends EventEmitter {
 
         let requiredPower = defaultForActions[action];
 
-        let investigate = powerLevelsEvent;
+        let investigate = pls.currentPL as Json;
+        // Trivial object traversal with '.' seperator.
         action.split('.').forEach(k => (investigate = investigate?.[k]));
-        if (Number.isFinite(investigate)) requiredPower = investigate;
+        // Only accept numbers that are valid power levels.
+        if (typeof investigate === "number" && Number.isFinite(investigate)) {
+            requiredPower = investigate;
+        }
 
-        let userPower = 0;
-        if (Number.isFinite(powerLevelsEvent["users_default"])) userPower = powerLevelsEvent["users_default"];
-        if (Number.isFinite(powerLevelsEvent["users"]?.[userId])) userPower = powerLevelsEvent["users"][userId];
-
-        return userPower >= requiredPower;
+        return pls.getUserPowerLevel(userId) >= requiredPower;
     }
 
     /**
@@ -1528,15 +1636,13 @@ export class MatrixClient extends EventEmitter {
         const canChangePower = await this.userHasPowerLevelFor(myUserId, roomId, "m.room.power_levels", true);
         if (!canChangePower) return { canModify: false, maximumPossibleLevel: 0 };
 
-        const powerLevelsEvent = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
-        if (!powerLevelsEvent) {
-            throw new Error("No power level event found");
-        }
+        const pls = new PLManager(
+            await this.getRoomCreateEvent(roomId),
+            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+        );
 
-        let targetUserPower = 0;
-        let myUserPower = 0;
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][targetUserId]) targetUserPower = powerLevelsEvent["users"][targetUserId];
-        if (powerLevelsEvent["users"] && powerLevelsEvent["users"][myUserId]) myUserPower = powerLevelsEvent["users"][myUserId];
+        const targetUserPower = pls.getUserPowerLevel(targetUserId);
+        const myUserPower = pls.getUserPowerLevel(myUserId);
 
         if (myUserId === targetUserId) {
             return { canModify: true, maximumPossibleLevel: myUserPower };
@@ -1561,10 +1667,17 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async setUserPowerLevel(userId: string, roomId: string, newLevel: number): Promise<any> {
-        const currentLevels = await this.getRoomStateEvent(roomId, "m.room.power_levels", "");
+        const currentLevels = await this.getRoomStateEventContent(roomId, "m.room.power_levels", "");
         if (!currentLevels['users']) currentLevels['users'] = {};
         currentLevels['users'][userId] = newLevel;
         await this.sendStateEvent(roomId, "m.room.power_levels", "", currentLevels);
+    }
+
+    private async getMediaEndpointPrefix() {
+        if (await this.doesServerSupportVersion('v1.11')) {
+            return `/_matrix/client/v1/media`;
+        }
+        return `/_matrix/media/v3`;
     }
 
     /**
@@ -1572,12 +1685,10 @@ export class MatrixClient extends EventEmitter {
      * @param {string} mxc The MXC URI to convert
      * @returns {string} The HTTP URL for the content.
      */
-    public mxcToHttp(mxc: string): string {
-        if (!mxc.startsWith("mxc://")) throw new Error("Not a MXC URI");
-        const parts = mxc.substring("mxc://".length).split('/');
-        const originHomeserver = parts[0];
-        const mediaId = parts.slice(1, parts.length).join('/');
-        return `${this.homeserverUrl}/_matrix/media/v3/download/${encodeURIComponent(originHomeserver)}/${encodeURIComponent(mediaId)}`;
+    public async mxcToHttp(mxc: string): Promise<string> {
+        const { domain, mediaId } = MXCUrl.parse(mxc);
+        const endpoint = await this.getMediaEndpointPrefix();
+        return `${this.homeserverUrl}${endpoint}/download/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`;
     }
 
     /**
@@ -1588,9 +1699,9 @@ export class MatrixClient extends EventEmitter {
      * @param {"crop"|"scale"} method Whether to crop or scale (preserve aspect ratio) the content.
      * @returns {string} The HTTP URL for the downsized content.
      */
-    public mxcToHttpThumbnail(mxc: string, width: number, height: number, method: "crop" | "scale"): string {
-        const downloadUri = this.mxcToHttp(mxc);
-        return downloadUri.replace("/_matrix/media/v3/download", "/_matrix/media/v3/thumbnail")
+    public async mxcToHttpThumbnail(mxc: string, width: number, height: number, method: "crop" | "scale"): Promise<string> {
+        const downloadUri = await this.mxcToHttp(mxc);
+        return downloadUri.replace("/download", "/thumbnail")
             + `?width=${width}&height=${height}&method=${encodeURIComponent(method)}`;
     }
 
@@ -1603,7 +1714,7 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<string>} resolves to the MXC URI of the content
      */
     @timedMatrixClientFunctionCall()
-    public uploadContent(data: Buffer, contentType = "application/octet-stream", filename: string = null): Promise<string> {
+    public async uploadContent(data: Buffer, contentType = "application/octet-stream", filename: string = null): Promise<string> {
         // TODO: Make doRequest take an object for options
         return this.doRequest("POST", "/_matrix/media/v3/upload", { filename: filename }, data, 60000, false, contentType)
             .then(response => response["content_uri"]);
@@ -1616,16 +1727,16 @@ export class MatrixClient extends EventEmitter {
      * @param {string} allowRemote Indicates to the server that it should not attempt to fetch the
      * media if it is deemed remote. This is to prevent routing loops where the server contacts itself.
      * Defaults to true if not provided.
+     * This is IGNORED if the content scanner is configured, as the API has no compatible option.
      * @returns {Promise<{data: Buffer, contentType: string}>} Resolves to the downloaded content.
      */
     public async downloadContent(mxcUrl: string, allowRemote = true): Promise<{ data: Buffer, contentType: string }> {
-        if (!mxcUrl.toLowerCase().startsWith("mxc://")) {
-            throw Error("'mxcUrl' does not begin with mxc://");
+        if (this.contentScannerInstance) {
+            return this.contentScannerInstance.downloadContent(mxcUrl);
         }
-        const urlParts = mxcUrl.substring("mxc://".length).split("/");
-        const domain = encodeURIComponent(urlParts[0]);
-        const mediaId = encodeURIComponent(urlParts[1].split("/")[0]);
-        const path = `/_matrix/client/v1/media/download/${domain}/${mediaId}`;
+        const endpoint = await this.getMediaEndpointPrefix();
+        const { domain, mediaId } = MXCUrl.parse(mxcUrl);
+        const path = `${endpoint}/download/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`;
         const res = await this.doRequest("GET", path, { allow_remote: allowRemote }, null, null, true, null, true);
         return {
             data: res.body,
@@ -1665,6 +1776,20 @@ export class MatrixClient extends EventEmitter {
         }).then(obj => {
             return this.uploadContent(obj.body, obj.contentType);
         });
+    }
+
+    /**
+     * Upgrade a room. This will call the room upgrade endpoint on the homeserver, which will create a new room with some of the
+     * state carried over. See the spec for which state will be carried over.
+     * @param roomId The room to upgrade
+     * @param newVersion The room version of the new room.
+     * @see {@link https://spec.matrix.org/v1.15/client-server-api/#server-behaviour-19}
+     * @returns The new room ID
+     */
+    @timedMatrixClientFunctionCall()
+    public async upgradeRoom(roomId: string, newVersion: string): Promise<string> {
+        const req = await this.doRequest('POST', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/upgrade`, undefined, { new_version: newVersion });
+        return req.replacement_room;
     }
 
     /**
@@ -1716,7 +1841,7 @@ export class MatrixClient extends EventEmitter {
 
                         if (create) {
                             if (!create['content']) create['content'] = {};
-                            prevVersion = create['content']['room_version'] || "1";
+                            prevVersion = (create['content'] as CreateEventContent)['room_version'] || "1";
                         }
                     } catch (e) {
                         // state not available
@@ -1760,7 +1885,7 @@ export class MatrixClient extends EventEmitter {
                             createEventId = create['event_id'];
                         }
 
-                        newRoomVersion = create['content']['room_version'] || "1";
+                        newRoomVersion = (create['content'] as CreateEventContent)['room_version'] || "1";
                     }
                 } catch (e) {
                     // state not available
@@ -1847,7 +1972,7 @@ export class MatrixClient extends EventEmitter {
     @timedMatrixClientFunctionCall()
     public async getSpace(roomIdOrAlias: string): Promise<Space> {
         const roomId = await this.resolveRoom(roomIdOrAlias);
-        const createEvent = await this.getRoomStateEvent(roomId, "m.room.create", "");
+        const createEvent = await this.getRoomStateEventContent(roomId, "m.room.create", "");
         if (createEvent["type"] !== "m.space") {
             throw new Error("Room is not a space");
         }
@@ -1969,6 +2094,85 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
+     * Get information about the latest room key backup version.
+     * @returns {Promise<IKeyBackupInfoRetrieved|null>} Resolves to the retrieved key backup info,
+     * or null if there is no existing backup.
+     */
+    public async getKeyBackupVersion(): Promise<IKeyBackupInfoRetrieved|null> {
+        try {
+            return await this.doRequest("GET", "/_matrix/client/v3/room_keys/version");
+        } catch (e) {
+            if (e instanceof MatrixError && e.errcode === "M_NOT_FOUND") {
+                return null;
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Create a new room key backup.
+     * @param {IKeyBackupInfoUnsigned} info The properties of the key backup to create,
+     * with its auth_data left unsigned.
+     * @returns {Promise<IKeyBackupVersion>} Resolves to the version id of the new backup.
+     */
+    @requiresCrypto()
+    public async signAndCreateKeyBackupVersion(info: IKeyBackupInfoUnsigned): Promise<IKeyBackupVersion> {
+        const data: IKeyBackupInfo = {
+            ...info,
+            auth_data: {
+                ...info.auth_data,
+                signatures: await this.crypto.sign(info),
+            },
+        };
+        return this.doRequest("POST", "/_matrix/client/v3/room_keys/version", null, data);
+    }
+
+    /**
+     * Update an existing room key backup.
+     * @param {KeyBackupVersion} version The key backup version to update.
+     * @param {IKeyBackupInfoUpdate} info The properties of the key backup to be applied.
+     * @returns {Promise<void>} Resolves when complete.
+     */
+    @requiresCrypto()
+    public updateKeyBackupVersion(version: KeyBackupVersion, info: IKeyBackupInfoUpdate): Promise<void> {
+        const data = {
+            ...info,
+            signatures: this.crypto.sign(info),
+        };
+        return this.doRequest("PUT", `/_matrix/client/v3/room_keys/version/${version}`, null, data);
+    }
+
+    /**
+     * Enable backing up of room keys.
+     * @param {IKeyBackupInfoRetrieved} info The configuration for key backup behaviour,
+     * as returned by {@link getKeyBackupVersion}.
+     * @returns {Promise<void>} Resolves when complete.
+     */
+    @requiresCrypto()
+    public enableKeyBackup(info: IKeyBackupInfoRetrieved): Promise<void> {
+        return this.crypto.enableKeyBackup(info);
+    }
+
+    /**
+     * Disable backing up of room keys.
+     */
+    public disableKeyBackup(): Promise<void> {
+        return this.crypto?.disableKeyBackup() ?? Promise.resolve();
+    }
+
+    /**
+     * Exports a set of keys for a given session.
+     * @param roomId The room ID for the session.
+     * @param sessionId The session ID.
+     * @returns An array of session keys.
+     */
+    @requiresCrypto()
+    public exportRoomKeysForSession(roomId: string, sessionId: string) {
+        return this.crypto.exportRoomKeysForSession(roomId, sessionId);
+    }
+
+    /**
      * Get relations for a given event.
      * @param {string} roomId The room ID to for the given event.
      * @param {string} eventId The event ID to list relations for.
@@ -2002,7 +2206,8 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise<any>} Resolves to the response (body), rejected if a non-2xx status code was returned.
      */
     @timedMatrixClientFunctionCall()
-    public doRequest(method, endpoint, qs = null, body = null, timeout = 60000, raw = false, contentType = "application/json", noEncoding = false): Promise<any> {
+    public doRequest(method, endpoint, qs = null, body = null, timeout = 60000, raw = false,
+        contentType = "application/json", noEncoding = false, opts?: DoHttpRequestOpts): Promise<any> {
         if (this.impersonatedUserId) {
             if (!qs) qs = { "user_id": this.impersonatedUserId };
             else qs["user_id"] = this.impersonatedUserId;
@@ -2015,7 +2220,10 @@ export class MatrixClient extends EventEmitter {
         if (this.accessToken) {
             headers["Authorization"] = `Bearer ${this.accessToken}`;
         }
-        return doHttpRequest(this.homeserverUrl, method, endpoint, qs, body, headers, timeout, raw, contentType, noEncoding);
+        return doHttpRequest(
+            this.homeserverUrl, method, endpoint, qs, body, headers,
+            timeout, raw, contentType, noEncoding, opts,
+        );
     }
 }
 

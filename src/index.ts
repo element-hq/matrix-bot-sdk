@@ -42,7 +42,7 @@ export * from "./mixins/AutojoinUpgradedRoomsMixin";
 export * from "./models/Presence";
 export * from "./models/MatrixProfile";
 export * from "./models/EventContext";
-export * from "./models/PowerLevelBounds";
+export * from "./models/PowerLevels";
 export * from "./models/OpenIDConnect";
 export * from "./models/Policies";
 export * from "./models/Threepid";
@@ -51,10 +51,10 @@ export * from "./models/IdentityServerModels";
 export * from "./models/Crypto";
 export * from "./models/MSC2176";
 export * from "./models/Account";
-export * from "./models/PowerLevelAction";
 export * from "./models/ServerVersions";
 export * from "./models/MatrixError";
 export * from "./models/CreateRoom";
+export * from "./models/MXCUrl";
 
 // Unstable models
 export * from "./models/unstable/MediaInfo";
@@ -112,6 +112,7 @@ export * from "./request";
 export * from "./PantalaimonClient";
 export * from "./SynchronousMatrixClient";
 export * from "./SynapseAdminApis";
+export * from "./MatrixContentScannerClient";
 export * from "./simple-validation";
 export * from "./b64";
 export * from "./http";

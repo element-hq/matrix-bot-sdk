@@ -88,7 +88,7 @@ export class ProfileCache {
     private async getUserProfileWith(userId: string, roomId: string, client: MatrixClient): Promise<MatrixProfile> {
         try {
             if (roomId) {
-                const membership = await client.getRoomStateEvent(roomId, "m.room.member", userId);
+                const membership = await client.getRoomStateEventContent(roomId, "m.room.member", userId);
                 return new MatrixProfile(userId, membership);
             } else {
                 const profile = await client.getUserProfile(userId);

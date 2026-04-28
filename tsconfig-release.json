@@ -4,15 +4,14 @@
     "emitDecoratorMetadata": true,
     "module": "commonjs",
     "moduleResolution": "node",
-    "target": "es2020",
+    "target": "es2022",
     "noImplicitAny": false,
     "sourceMap": true,
     "outDir": "./lib",
     "declaration": true,
     "types": [
       "node",
-      "express",
-      "jest"
+      "express"
     ]
   },
   "include": [

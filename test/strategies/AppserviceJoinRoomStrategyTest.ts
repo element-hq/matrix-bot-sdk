@@ -18,6 +18,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -62,6 +63,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -117,6 +119,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -172,6 +175,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -221,6 +225,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -274,6 +279,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -336,6 +342,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
@@ -389,6 +396,7 @@ describe('AppserviceJoinRoomStrategy', () => {
                     rooms: [],
                     aliases: [],
                 },
+                url: null,
             },
         });
         appservice.botIntent.ensureRegistered = () => {
