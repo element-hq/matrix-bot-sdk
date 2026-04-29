@@ -17,7 +17,7 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - name: Upgrade npm for Trusted Publishing
         run: npm i -g npm@latest
-      - run: yarn --strict-semver --frozen-lockfile
+      - run: yarn install --frozen-lockfile
       - run: yarn build
       - name: Publish to npmjs.com
         run: npm publish --access public --provenance
