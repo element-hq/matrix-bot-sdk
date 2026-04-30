@@ -9,7 +9,7 @@ jobs:
   # ================================================
   eslint:
     name: 'ESLint'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
@@ -25,7 +25,7 @@ jobs:
       matrix:
         node: [ 24, 25 ]
     name: 'Build Node ${{ matrix.node }}'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
@@ -40,7 +40,7 @@ jobs:
       matrix:
         node: [ 24, 25 ]
     name: 'Build Docs Node ${{ matrix.node }}'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
@@ -54,7 +54,7 @@ jobs:
       matrix:
         node: [ 24, 25 ]
     name: 'Tests Node ${{ matrix.node }}'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
