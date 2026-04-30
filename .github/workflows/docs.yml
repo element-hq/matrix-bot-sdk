@@ -1,8 +1,7 @@
 name: Docs
 on:
   push:
-    branches:
-      - main
+    tags: ["*-element.*"]
 jobs:
   build-and-deploy:
     runs-on: ubuntu-24.04
@@ -17,4 +16,4 @@ jobs:
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages
-        folder: .jsdoc/@vector-im/matrix-bot-sdk/develop
+        folder: .jsdoc/@vector-im/matrix-bot-sdk/${{ github.ref_name }}
