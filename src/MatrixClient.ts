@@ -1,5 +1,4 @@
 import { EventEmitter } from "events";
-import { htmlEncode } from "htmlencode";
 import { htmlToText } from "html-to-text";
 import { LRUCache } from "lru-cache";
 
@@ -51,6 +50,19 @@ import { MatrixCapabilities } from "./models/Capabilities";
 import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
 import { IJsonType, Json } from "./helpers/Types";
+
+// Encode plain text for inclusion in HTML. Replaces htmlencode@0.0.4, which
+// imports `util._extend` at module load on Node 22+ and emits a DEP0060
+// warning the consumer cannot suppress. Matrix only requires the five
+// special characters to be escaped; non-ASCII codepoints render fine as-is.
+function htmlEncode(text: string): string {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
 
 const SYNC_BACKOFF_MIN_MS = 5000;
 const SYNC_BACKOFF_MAX_MS = 15000;
