@@ -4,8 +4,8 @@ TypeScript/JavaScript SDK for Matrix bots. For help and support, visit [#matrix-
 
 ## Templates and guides
 
-* [Bot documentation](https://turt2live.github.io/matrix-bot-sdk/tutorial-bot.html)
-* [Appservice/bridge documentation](https://turt2live.github.io/matrix-bot-sdk/tutorial-appservice.html)
+* [Bot documentation](https://element-hq.github.io/matrix-bot-sdk/tutorial-bot.html)
+* [Appservice/bridge documentation](https://element-hq.github.io/matrix-bot-sdk/tutorial-appservice.html)
 * [matrix.org's guide on the basic functions of the bot](https://matrix.org/docs/guides/usage-of-matrix-bot-sdk)
 * [GitHub bot template repository](https://github.com/turt2live/matrix-bot-sdk-bot-template)
 
