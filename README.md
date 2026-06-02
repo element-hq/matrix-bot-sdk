@@ -6,7 +6,7 @@ TypeScript/JavaScript SDK for Matrix bots. For help and support, visit [#matrix-
 
 # Documentation
 
-Documentation for the project is available [here](https://turt2live.github.io/matrix-bot-sdk/index.html).
+Documentation for the project is available [here](https://element-hq.github.io/matrix-bot-sdk/).
 
 # Matrix version support
 
