@@ -736,7 +736,7 @@
   dependencies:
     lodash "^4.17.21"
 
-"@matrix-org/matrix-sdk-crypto-nodejs@0.6.0":
+"@matrix-org/matrix-sdk-crypto-nodejs@^0.6.0":
   version "0.6.0"
   resolved "https://registry.yarnpkg.com/@matrix-org/matrix-sdk-crypto-nodejs/-/matrix-sdk-crypto-nodejs-0.6.0.tgz#a3425610583f4817cd0f389aaaf84c5545b1a354"
   integrity sha512-AndGryzkDtFbaDyPBAQ2B4pUhaA/q4HJf3wgiGpPa/70DsdY1Z3R5Wn9yp+56CeHOpk61mNHz/8WDPlzrZDSJw==
