@@ -423,7 +423,7 @@ describe('CryptoClient', () => {
                 key: {
                     alg: "A256CTR",
                     ext: true,
-                    key_ops: ['encrypt', 'decrypt'],
+                    key_ops: ["decrypt", "encrypt"],
                     kty: "oct",
                     k: expect.any(String),
                 },
@@ -447,10 +447,7 @@ describe('CryptoClient', () => {
                 alg: "A256CTR",
                 ext: true,
                 k: "l3OtQ3IJzfJa85j2WMsqNu7J--C-I1hzPxFvinR48mM",
-                key_ops: [
-                    "encrypt",
-                    "decrypt",
-                ],
+                key_ops: ["decrypt", "encrypt"],
                 kty: "oct",
             },
             iv: "KJQOebQS1wwAAAAAAAAAAA",
