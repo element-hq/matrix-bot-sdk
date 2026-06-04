@@ -1,5 +1,4 @@
 import * as simple from "simple-mock";
-import HttpBackend from 'matrix-mock-request';
 
 import {
     ICurve25519AuthDataUnsigned,
@@ -10,6 +9,7 @@ import {
     KeyBackupEncryptionAlgorithm,
 } from "../../src/models/KeyBackup";
 import { ICryptoRoomInformation, IToDeviceMessage, MatrixClient, MembershipEvent, RoomEncryptionAlgorithm, RoomTracker } from "../../src";
+import HttpBackend from '../MatrixMockRequest';
 import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID, generateCurve25519PublicKey, bindNullQuery } from "../TestUtils";
 
 const USER_ID = "@alice:example.org";

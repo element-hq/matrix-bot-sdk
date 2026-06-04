@@ -1,8 +1,8 @@
 import * as tmp from "tmp";
-import HttpBackend from "matrix-mock-request";
 import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import { IStorageProvider, MatrixClient, OTKAlgorithm, RustSdkCryptoStorageProvider, ServerVersions, UnpaddedBase64, setRequestFn } from "../src";
+import HttpBackend from "./MatrixMockRequest";
 
 export const TEST_DEVICE_ID = "TEST_DEVICE";
 

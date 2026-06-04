@@ -1,7 +1,7 @@
 import * as simple from "simple-mock";
-import HttpBackend from 'matrix-mock-request';
 
 import { EncryptedFile, EncryptionAlgorithm, IOlmEncrypted, IToDeviceMessage, MatrixClient, MembershipEvent, OTKAlgorithm, RoomEncryptionAlgorithm } from "../../src";
+import HttpBackend from '../MatrixMockRequest';
 import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
 
 describe('CryptoClient', () => {
