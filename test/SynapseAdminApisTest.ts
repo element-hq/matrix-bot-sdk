@@ -1,5 +1,3 @@
-import HttpBackend from 'matrix-mock-request';
-
 import {
     IStorageProvider,
     MatrixClient,
@@ -13,6 +11,7 @@ import {
     SynapseUserList,
     SynapseUserProperties,
 } from "../src";
+import HttpBackend from './MatrixMockRequest';
 import { createTestClient } from "./TestUtils";
 
 export function createTestSynapseAdminClient(

@@ -1,7 +1,7 @@
-import HttpBackend from 'matrix-mock-request';
 import * as simple from "simple-mock";
 
 import { IdentityClient, MatrixClient, setRequestFn, Threepid } from "../src";
+import HttpBackend from './MatrixMockRequest';
 import { createTestClient } from "./TestUtils";
 
 export async function createTestIdentityClient(): Promise<{ client: IdentityClient, mxClient: MatrixClient, http: HttpBackend, identityUrl: string, accessToken: string }> {

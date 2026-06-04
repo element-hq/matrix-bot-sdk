@@ -1,8 +1,8 @@
 import * as simple from "simple-mock";
-import HttpBackend from 'matrix-mock-request';
 import * as tmp from "tmp";
 import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
+import HttpBackend from '../MatrixMockRequest';
 import {
     Appservice,
     IAppserviceCryptoStorageProvider,

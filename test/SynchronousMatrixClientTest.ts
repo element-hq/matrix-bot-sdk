@@ -1,7 +1,7 @@
 import * as simple from "simple-mock";
-import HttpBackend from 'matrix-mock-request';
 
 import { IStorageProvider, MatrixClient, setRequestFn, SynchronousMatrixClient } from "../src";
+import HttpBackend from './MatrixMockRequest';
 
 class TestSyncMatrixClient extends SynchronousMatrixClient {
     constructor(client: MatrixClient) {

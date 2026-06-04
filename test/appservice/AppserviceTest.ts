@@ -1,9 +1,9 @@
 import * as getPort from "get-port";
 import * as requestPromise from "request-promise";
 import * as simple from "simple-mock";
-import HttpBackend from 'matrix-mock-request';
 
 import { Appservice, EventKind, Intent, IPreprocessor, setRequestFn } from "../../src";
+import HttpBackend from '../MatrixMockRequest';
 
 async function beginAppserviceWithProtocols(protocols: string[]) {
     const port = await getPort();

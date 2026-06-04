@@ -1,6 +1,5 @@
-import HttpBackend from 'matrix-mock-request';
-
 import { IStorageProvider, MatrixClient, MSC2380MediaInfo, UnstableApis } from "../src";
+import HttpBackend from './MatrixMockRequest';
 import { createTestClient } from "./TestUtils";
 
 export function createTestUnstableClient(
