@@ -56,13 +56,11 @@ class HttpBackend {
         debug(`HTTP backend received request: ${req}`);
         this.requests.push(req);
 
-        const self = this;
-
-        const abort = function () {
-            const idx = self.requests.indexOf(req);
+        const abort = () => {
+            const idx = this.requests.indexOf(req);
             if (idx >= 0) {
                 debug("Aborting HTTP request: %s %s", opts.method, opts.uri);
-                self.requests.splice(idx, 1);
+                this.requests.splice(idx, 1);
                 const e = new Error("aborted");
                 e.name = "AbortError";
                 req.callback(e);
@@ -160,7 +158,7 @@ class HttpBackend {
         debug(`HTTP backend flushing (sync)... (path=${path} ` + `numToFlush=${numToFlush})`);
 
         let numFlushed = 0;
-        while ((!numToFlush || numFlushed < numToFlush) && this._takeFromQueue(debug, path)) {
+        while ((!numToFlush || numFlushed < numToFlush) && this.takeFromQueue(debug, path)) {
             ++numFlushed;
         }
         return numFlushed;
@@ -177,7 +175,6 @@ class HttpBackend {
      *    number of requests flushed
      */
     public flush = (path: string | undefined, numToFlush?: number, waitTime?: number): Promise<number> => {
-        const self = this;
         const promise = new Promise<number>((resolve, reject) => {
             let flushed = 0;
             if (waitTime === undefined) {
@@ -196,10 +193,10 @@ class HttpBackend {
                 }
             };
 
-            const _tryFlush = function () {
+            const _tryFlush = () => {
                 // if there's more real requests and more expected requests, flush 'em.
-                log(`  trying to flush => reqs=[${self.requests}] ` + `expected=[${self.expectedRequests}]`);
-                if (self._takeFromQueue(log, path)) {
+                log(`  trying to flush => reqs=[${this.requests}] ` + `expected=[${this.expectedRequests}]`);
+                if (this.takeFromQueue(log, path)) {
                     // try again on the next tick.
                     flushed += 1;
                     if (numToFlush && flushed === numToFlush) {
@@ -298,7 +295,7 @@ class HttpBackend {
      * @param {string} path The path to flush (optional) default: all.
      * @return {boolean} true if something was resolved.
      */
-    private _takeFromQueue = (debug: (string) => void, path: string): boolean => {
+    private takeFromQueue = (debug: (string) => void, path: string): boolean => {
         let req: Request | null = null;
         let i: number;
         let j: number;
