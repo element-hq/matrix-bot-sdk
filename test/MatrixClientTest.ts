@@ -3549,9 +3549,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -3590,9 +3589,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             const expectedContent = {
@@ -3643,9 +3641,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
@@ -3662,7 +3659,7 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         }));
 
-        it('should use encoded plain text as the HTML component', async () => {
+        it('should omit HTML when replying with plain text', async () => {
             const { client, http, hsUrl } = createTestClient();
 
             const roomId = "!testing:example.org";
@@ -3676,7 +3673,6 @@ describe('MatrixClient', () => {
                 event_id: "$abc:example.org",
             };
             const replyText = "<testing1234>";
-            const replyHtml = "&lt;testing1234&gt;";
 
             const expectedContent = {
                 "m.relates_to": {
@@ -3685,10 +3681,7 @@ describe('MatrixClient', () => {
                     },
                 },
                 "msgtype": "m.text",
-                "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -3729,9 +3722,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -3770,9 +3762,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             const expectedContent = {
@@ -3823,9 +3814,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.text",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
@@ -3868,9 +3858,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -3909,9 +3898,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             const expectedContent = {
@@ -3962,9 +3950,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
@@ -3981,7 +3968,7 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         }));
 
-        it('should use encoded plain text as the HTML component', async () => {
+        it('should omit HTML when replying with plain text', async () => {
             const { client, http, hsUrl } = createTestClient();
 
             const roomId = "!testing:example.org";
@@ -3995,7 +3982,6 @@ describe('MatrixClient', () => {
                 event_id: "$abc:example.org",
             };
             const replyText = "<testing1234>";
-            const replyHtml = "&lt;testing1234&gt;";
 
             const expectedContent = {
                 "m.relates_to": {
@@ -4004,10 +3990,7 @@ describe('MatrixClient', () => {
                     },
                 },
                 "msgtype": "m.notice",
-                "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -4048,9 +4031,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             // noinspection TypeScriptValidateJSTypes
@@ -4089,9 +4071,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             const expectedContent = {
@@ -4142,9 +4123,8 @@ describe('MatrixClient', () => {
                 },
                 "msgtype": "m.notice",
                 "format": "org.matrix.custom.html",
-                "body": `> <${originalEvent.sender}> ${originalEvent.content.body}\n\n${replyText}`,
-                // eslint-disable-next-line max-len
-                "formatted_body": `<mx-reply><blockquote><a href="https://matrix.to/#/${roomId}/${originalEvent.event_id}">In reply to</a> <a href="https://matrix.to/#/${originalEvent.sender}">${originalEvent.sender}</a><br />${originalEvent.content.formatted_body}</blockquote></mx-reply>${replyHtml}`,
+                "body": replyText,
+                "formatted_body": replyHtml,
             };
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
