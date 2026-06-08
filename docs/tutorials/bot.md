@@ -12,7 +12,7 @@ been made prior to deploying the bot. If you already have an access token, skip 
 **Registration**:
 
 ```typescript
-import { MatrixAuth } from "matrix-bot-sdk";
+import { MatrixAuth } from "@vector-im/matrix-bot-sdk";
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without
@@ -28,7 +28,7 @@ console.log("Copy this access token to your bot's config: ", client.accessToken)
 **Login** (preferred):
 
 ```typescript
-import { MatrixAuth } from "matrix-bot-sdk";
+import { MatrixAuth } from "@vector-im/matrix-bot-sdk";
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without
@@ -52,7 +52,7 @@ import {
     MatrixClient,
     SimpleFsStorageProvider,
     AutojoinRoomsMixin,
-} from "matrix-bot-sdk";
+} from "@vector-im/matrix-bot-sdk";
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without
