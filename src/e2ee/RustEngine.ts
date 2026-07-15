@@ -245,45 +245,63 @@ export class RustEngine {
         }
     }
 
+    /**
+     * Runs a request against the homeserver and marks it as sent on the machine if it succeeds.
+     * If it fails, the failure is emitted on the client instead of being thrown, so a single
+     * failed request cannot crash the process or prevent other queued requests from being
+     * processed. The request is left unmarked on failure, meaning it may be regenerated and
+     * retried on a subsequent cycle.
+     */
+    private async sendAndMarkRequest(
+        failureEvent: string,
+        requestIdOrTxnId: string,
+        requestType: RequestType,
+        doHttp: () => Promise<Awaited<ReturnType<MatrixClient["doRequest"]>>>,
+    ) {
+        let resp: Awaited<ReturnType<MatrixClient["doRequest"]>>;
+        try {
+            resp = await doHttp();
+        } catch (e) {
+            this.client.emit(failureEvent, e);
+            return;
+        }
+        await this.machine.markRequestAsSent(requestIdOrTxnId, requestType, JSON.stringify(resp));
+    }
+
     private async processKeysClaimRequest(request: KeysClaimRequest) {
-        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/claim", null, JSON.parse(request.body));
-        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_keys_claim", request.id, request.type, () =>
+            this.client.doRequest("POST", "/_matrix/client/v3/keys/claim", null, JSON.parse(request.body)));
     }
 
     private async processKeysUploadRequest(request: KeysUploadRequest) {
         const body = JSON.parse(request.body);
         // delete body["one_time_keys"]; // use this to test MSC3983
-        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body);
-        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_upload", request.id, request.type, () =>
+            this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body));
     }
 
     private async processKeysQueryRequest(request: KeysQueryRequest) {
-        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/query", null, JSON.parse(request.body));
-        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_keys_query", request.id, request.type, () =>
+            this.client.doRequest("POST", "/_matrix/client/v3/keys/query", null, JSON.parse(request.body)));
     }
 
     private async processToDeviceRequest(request: ToDeviceRequest) {
-        const resp = await this.client.sendToDevices(request.eventType, JSON.parse(request.body).messages);
-        await this.machine.markRequestAsSent(request.txnId, RequestType.ToDevice, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_to_device", request.txnId, RequestType.ToDevice, () =>
+            this.client.sendToDevices(request.eventType, JSON.parse(request.body).messages));
     }
 
     private async processKeysBackupRequest(request: KeysBackupRequest) {
-        let resp: Awaited<ReturnType<MatrixClient["doRequest"]>>;
-        try {
-            if (!this.keyBackupVersion) {
-                throw new Error("Key backup version missing");
-            }
-            resp = await this.client.doRequest("PUT", "/_matrix/client/v3/room_keys/keys", { version: this.keyBackupVersion }, JSON.parse(request.body));
-        } catch (e) {
-            this.client.emit("crypto.failed_backup", e);
+        if (!this.keyBackupVersion) {
+            this.client.emit("crypto.failed_backup", new Error("Key backup version missing"));
             return;
         }
-        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_backup", request.id, request.type, () =>
+            this.client.doRequest("PUT", "/_matrix/client/v3/room_keys/keys", { version: this.keyBackupVersion }, JSON.parse(request.body)));
     }
 
     private async processSignatureUploadRequest(request: SignatureUploadRequest) {
         const req = JSON.parse(request.body);
-        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/signatures/upload", null, req.signed_keys);
-        await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
+        await this.sendAndMarkRequest("crypto.failed_signature_upload", request.id, request.type, () =>
+            this.client.doRequest("POST", "/_matrix/client/v3/keys/signatures/upload", null, req.signed_keys));
     }
 }
