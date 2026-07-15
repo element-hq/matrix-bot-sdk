@@ -103,7 +103,9 @@ export class CryptoClient {
             this.storage.storageType,
         );
         this.engine = new RustEngine(machine, this.client);
-        await this.engine.run();
+        await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
+            await this.engine.run();
+        });
 
         const identity = this.engine.machine.identityKeys;
         this.deviceCurve25519 = identity.curve25519.toBase64();
@@ -255,7 +257,9 @@ export class CryptoClient {
         await this.engine.prepareEncrypt(roomId, await this.roomTracker.getRoomCryptoConfig(roomId));
 
         const encrypted = JSON.parse(await this.engine.machine.encryptRoomEvent(new RoomId(roomId), eventType, JSON.stringify(content)));
-        await this.engine.run();
+        await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
+            await this.engine.run();
+        });
         return encrypted as IMegolmEncrypted;
     }
 
@@ -347,7 +351,9 @@ export class CryptoClient {
             }),
         );
         LogService.debug("CryptoClient", "Secrets obtained");
-        await this.engine.processOutgoingRequests([signatureUploadRequest]);
+        await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
+            await this.engine.processOutgoingRequests([signatureUploadRequest]);
+        });
         LogService.debug("CryptoClient", "Identity confirmed");
     }
 
@@ -402,10 +408,14 @@ export class CryptoClient {
         const machine = this.engine.machine;
         const bootstrapRequests = await machine.bootstrapCrossSigning(true);
         if (bootstrapRequests.uploadKeysReq) {
-            await this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
+            await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
+                await this.engine.processOutgoingRequests([bootstrapRequests.uploadKeysReq]);
+            });
         }
         await client.doRequest("POST", "/_matrix/client/v3/keys/device_signing/upload", null, JSON.parse(bootstrapRequests.uploadSigningKeysReq));
-        await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
+        await this.engine.lock.acquire(SYNC_LOCK_NAME, async () => {
+            await this.engine.processOutgoingRequests([bootstrapRequests.uploadSignaturesReq]);
+        });
 
         if (key === undefined) {
             // If we created a new secret storage key (`key` was not given),
