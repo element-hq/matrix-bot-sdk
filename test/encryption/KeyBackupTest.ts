@@ -9,8 +9,7 @@ import {
     KeyBackupEncryptionAlgorithm,
 } from "../../src/models/KeyBackup";
 import { ICryptoRoomInformation, IToDeviceMessage, MatrixClient, MembershipEvent, RoomEncryptionAlgorithm, RoomTracker } from "../../src";
-import HttpBackend from '../MatrixMockRequest';
-import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID, generateCurve25519PublicKey, bindNullQuery } from "../TestUtils";
+import { bindNullEngine, createTestClient, HttpBackend, testCryptoStores, TEST_DEVICE_ID, generateCurve25519PublicKey, bindNullQuery } from "../TestUtils";
 
 const USER_ID = "@alice:example.org";
 
@@ -35,11 +34,12 @@ describe('KeyBackups', () => {
     }));
 
     it('should retrieve a missing backup version', () => testCryptoStores(async (cryptoStoreType) => {
-        http.when("GET", "/room_keys/version").respond(400, (path, obj) => {
-            return {
-                errcode: "M_NOT_FOUND",
-                error: "No current backup version",
-            };
+        http.mock.intercept({
+            method: "GET",
+            path: "_matrix/client/v3/room_keys/version",
+        }).reply(400, {
+            errcode: "M_NOT_FOUND",
+            error: "No current backup version",
         });
 
         await Promise.all([
@@ -81,7 +81,11 @@ describe('KeyBackups', () => {
 
         let keyBackupInfoOnServer: IKeyBackupInfoRetrieved|undefined;
 
-        http.when("POST", "/_matrix/client/v3/room_keys/version").respond(200, (path, obj: IKeyBackupInfo) => {
+        http.mock.intercept({
+            method: "POST",
+            path: "/_matrix/client/v3/room_keys/version",
+        }).reply(200, (opts) => {
+            const obj: IKeyBackupInfo = JSON.parse(opts.body as string);
             expect(obj.auth_data.signatures[USER_ID]).toHaveProperty(`ed25519:${TEST_DEVICE_ID}`);
 
             keyBackupInfoOnServer = {
@@ -90,10 +94,13 @@ describe('KeyBackups', () => {
                 count: 0,
                 etag: "etag0",
             };
-            return keyBackupInfoOnServer.version;
+            return { version: keyBackupInfoOnServer.version };
         });
 
-        http.when("GET", "/_matrix/client/v3/room_keys/version").respond(200, (path, obj) => {
+        http.mock.intercept({
+            method: "GET",
+            path: "/_matrix/client/v3/room_keys/version",
+        }).reply(200, () => {
             expect(keyBackupInfoOnServer).toBeDefined();
             expect(keyBackupInfoOnServer.version).toBe("1");
 
@@ -102,7 +109,7 @@ describe('KeyBackups', () => {
 
         await Promise.all([
             (async () => {
-                const keyBackupVersion = await client.signAndCreateKeyBackupVersion(keyBackupInfo);
+                const keyBackupVersion = (await client.signAndCreateKeyBackupVersion(keyBackupInfo)).version;
                 expect(keyBackupVersion).toStrictEqual(keyBackupInfoOnServer.version);
 
                 const keyBackupInfoRetrieved = await client.getKeyBackupVersion();
@@ -179,13 +186,11 @@ describe('KeyBackups', () => {
 
         const encryptRoomEvent = async () => {
             bindNullQuery(http);
-            const encryptPromise = client.crypto.encryptRoomEvent(roomId, "m.room.message", { body: "my message" });
-            await http.flushAllExpected({ timeout: 10000 });
-
             // This is because encryptRoomEvent calls "/keys/query" after encrypting too.
             bindNullQuery(http);
+
             await Promise.all([
-                encryptPromise,
+                client.crypto.encryptRoomEvent(roomId, "m.room.message", { body: "my message" }),
                 http.flushAllExpected({ timeout: 10000 }),
             ]);
         };
@@ -212,19 +217,23 @@ describe('KeyBackups', () => {
         let expectedSessions = 0;
         let etagCount = 0;
 
-        const onBackupRequest = (path, obj: Record<string, unknown>): IKeyBackupUpdateResponse => {
-            const sessions = obj?.rooms[roomId]?.sessions;
-            expect(sessions).toBeDefined();
-
-            Object.keys(sessions).forEach(session => { knownSessions.add(session); });
-            return {
-                count: knownSessions.size,
-                etag: `etag${++etagCount}`,
-            };
-        };
-
         const expectToPutRoomKey = () => {
-            http.when("PUT", "/_matrix/client/v3/room_keys/keys").respond(200, onBackupRequest);
+            http.mock.intercept({
+                method: "PUT",
+                path: "/_matrix/client/v3/room_keys/keys",
+                query: { version: keyBackupInfo.version },
+            }).reply(200, (opts) => {
+                const obj: Record<string, unknown> = JSON.parse(opts.body as string);
+
+                const sessions = obj.rooms[roomId]?.sessions;
+                expect(sessions).toBeDefined();
+
+                Object.keys(sessions).forEach(session => { knownSessions.add(session); });
+                return {
+                    count: knownSessions.size,
+                    etag: `etag${++etagCount}`,
+                };
+            });
         };
 
         expectToPutRoomKey();

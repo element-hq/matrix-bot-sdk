@@ -18,17 +18,19 @@ describe('DMs', () => {
             [dmUserId2]: [dmRoomId2],
         };
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, accountDataDms);
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+        }).reply(200, accountDataDms);
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 ...accountDataDms,
                 [dmUserId1]: [dmRoomId1],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 
@@ -92,8 +94,10 @@ describe('DMs', () => {
             [dmUserId]: [dmRoomId],
         };
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, accountDataDms);
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+        }).reply(200, accountDataDms);
 
         expect(dms.isDm(dmRoomId)).toBe(false);
         await Promise.all([dms.update(), http.flushAllExpected()]);
@@ -107,8 +111,10 @@ describe('DMs', () => {
 
         const dmRoomId = "!dm:example.org";
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(404);
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+        }).reply(404);
 
         expect(dms.isDm(dmRoomId)).toBe(false);
         await Promise.all([dms.update(), http.flushAllExpected()]);
@@ -123,25 +129,24 @@ describe('DMs', () => {
         const dmRoomId = "!dm:example.org";
         const dmUserId = "@target:example.org";
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("POST", `/createRoom`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v3/createRoom`,
+            body: JSON.stringify({
                 invite: [dmUserId],
                 is_direct: true,
                 preset: "trusted_private_chat",
                 initial_state: [],
-            });
+            }),
+        }).reply(200, { room_id: dmRoomId });
 
-            return { room_id: dmRoomId };
-        });
-
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 [dmUserId]: [dmRoomId],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 
@@ -166,13 +171,13 @@ describe('DMs', () => {
             return dmRoomId;
         });
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 [dmUserId]: [dmRoomId],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 
@@ -198,62 +203,64 @@ describe('DMs', () => {
             [dmUserId]: [deadRoomId, dmRoomId],
         };
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, accountDataDms);
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+        }).reply(200, accountDataDms);
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `rooms/${encodeURIComponent(deadRoomId)}/members`).respond(200, (path, body) => {
-            return {
-                chunk: [
-                    // HACK: These are minimal events for testing purposes only.
-                    {
-                        type: "m.room.member",
-                        state_key: selfUserId,
-                        content: {
-                            membership: "join",
-                        },
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/rooms/${encodeURIComponent(deadRoomId)}/members`,
+        }).reply(200, {
+            chunk: [
+                // HACK: These are minimal events for testing purposes only.
+                {
+                    type: "m.room.member",
+                    state_key: selfUserId,
+                    content: {
+                        membership: "join",
                     },
-                    {
-                        type: "m.room.member",
-                        state_key: dmUserId,
-                        content: {
-                            membership: "leave",
-                        },
+                },
+                {
+                    type: "m.room.member",
+                    state_key: dmUserId,
+                    content: {
+                        membership: "leave",
                     },
-                ],
-            };
+                },
+            ],
         });
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `rooms/${encodeURIComponent(dmRoomId)}/members`).respond(200, (path, body) => {
-            return {
-                chunk: [
-                    // HACK: These are minimal events for testing purposes only.
-                    {
-                        type: "m.room.member",
-                        state_key: selfUserId,
-                        content: {
-                            membership: "join",
-                        },
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/rooms/${encodeURIComponent(dmRoomId)}/members`,
+        }).reply(200, {
+            chunk: [
+                // HACK: These are minimal events for testing purposes only.
+                {
+                    type: "m.room.member",
+                    state_key: selfUserId,
+                    content: {
+                        membership: "join",
                     },
-                    {
-                        type: "m.room.member",
-                        state_key: dmUserId,
-                        content: {
-                            membership: "join",
-                        },
+                },
+                {
+                    type: "m.room.member",
+                    state_key: dmUserId,
+                    content: {
+                        membership: "join",
                     },
-                ],
-            };
+                },
+            ],
         });
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 [dmUserId]: [dmRoomId],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 
@@ -283,8 +290,10 @@ describe('DMs', () => {
             [dmUserId]: [dmRoomId],
         };
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("GET", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, accountDataDms);
+        http.mock.intercept({
+            method: "GET",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+        }).reply(200, accountDataDms);
 
         const flush = http.flushAllExpected();
 
@@ -305,9 +314,11 @@ describe('DMs', () => {
         const dmRoomId = "!dm:example.org";
         const dmUserId = "@target:example.org";
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("POST", `/keys/query`).respond(200, (path, body) => {
-            expect(body).toMatchObject({
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v3/keys/query`,
+        }).reply(200, (opts) => {
+            expect(JSON.parse(opts.body as string)).toMatchObject({
                 device_keys: {
                     [dmUserId]: [],
                 },
@@ -327,9 +338,10 @@ describe('DMs', () => {
             };
         });
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("POST", `/createRoom`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v3/createRoom`,
+            body: JSON.stringify({
                 invite: [dmUserId],
                 is_direct: true,
                 preset: "trusted_private_chat",
@@ -338,18 +350,16 @@ describe('DMs', () => {
                     state_key: "",
                     content: { algorithm: EncryptionAlgorithm.MegolmV1AesSha2 },
                 }],
-            });
+            }),
+        }).reply(200, { room_id: dmRoomId });
 
-            return { room_id: dmRoomId };
-        });
-
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 [dmUserId]: [dmRoomId],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 
@@ -369,9 +379,11 @@ describe('DMs', () => {
         const dmRoomId = "!dm:example.org";
         const dmUserId = "@target:example.org";
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("POST", `/keys/query`).respond(200, (path, body) => {
-            expect(body).toMatchObject({
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v3/keys/query`,
+        }).reply(200, (opts) => {
+            expect(JSON.parse(opts.body as string)).toMatchObject({
                 device_keys: {
                     [dmUserId]: [],
                 },
@@ -383,25 +395,24 @@ describe('DMs', () => {
             };
         });
 
-        // noinspection TypeScriptValidateJSTypes
-        http.when("POST", `/createRoom`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v3/createRoom`,
+            body: JSON.stringify({
                 invite: [dmUserId],
                 is_direct: true,
                 preset: "trusted_private_chat",
                 initial_state: [],
-            });
+            }),
+        }).reply(200, { room_id: dmRoomId });
 
-            return { room_id: dmRoomId };
-        });
-
-        // noinspection TypeScriptValidateJSTypes
-        http.when("PUT", `/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`).respond(200, (path, body) => {
-            expect(body).toEqual({
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/user/${encodeURIComponent(selfUserId)}/account_data/m.direct`,
+            body: JSON.stringify({
                 [dmUserId]: [dmRoomId],
-            });
-            return {};
-        });
+            }),
+        }).reply(200, {});
 
         const flush = http.flushAllExpected();
 

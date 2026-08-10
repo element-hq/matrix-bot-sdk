@@ -2,7 +2,6 @@ import * as simple from "simple-mock";
 import * as tmp from "tmp";
 import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
-import HttpBackend from '../MatrixMockRequest';
 import {
     Appservice,
     IAppserviceCryptoStorageProvider,
@@ -14,6 +13,7 @@ import {
     RustSdkAppserviceCryptoStorageProvider,
     setRequestFn,
 } from "../../src";
+import { HttpBackend } from '../TestUtils';
 
 tmp.setGracefulCleanup();
 
@@ -139,13 +139,13 @@ describe('Intent', () => {
         });
 
         it('should try to register the user when not flagged as such', async () => {
-            const http = new HttpBackend();
-            setRequestFn(http.requestFn);
+            const hsUrl = "https://localhost";
+            const http = new HttpBackend(hsUrl);
+            http.mockAgent.enableNetConnect();
 
             const userId = "@someone:example.org";
             const botUserId = "@bot:example.org";
             const asToken = "s3cret";
-            const hsUrl = "https://localhost";
             const appservice = <Appservice>{ botUserId: botUserId };
 
             const storage = new MemoryStorageProvider();
@@ -166,8 +166,12 @@ describe('Intent', () => {
                 },
             };
 
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({ type: "m.login.application_service", username: "someone" });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+                query: { user_id: userId },
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ type: "m.login.application_service", username: "someone" });
                 return {};
             });
 
@@ -178,13 +182,13 @@ describe('Intent', () => {
         });
 
         it('should use the provided device ID', async () => {
-            const http = new HttpBackend();
-            setRequestFn(http.requestFn);
+            const hsUrl = "https://localhost";
+            const http = new HttpBackend(hsUrl);
+            http.mockAgent.enableNetConnect();
 
             const userId = "@someone:example.org";
             const botUserId = "@bot:example.org";
             const asToken = "s3cret";
-            const hsUrl = "https://localhost";
             const deviceId = "DEVICE_TEST";
             const appservice = <Appservice>{ botUserId: botUserId };
 
@@ -206,8 +210,12 @@ describe('Intent', () => {
                 },
             };
 
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({ type: "m.login.application_service", username: "someone", device_id: deviceId });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+                query: { user_id: userId },
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ type: "m.login.application_service", username: "someone", device_id: deviceId });
                 return { device_id: deviceId };
             });
 
@@ -216,23 +224,23 @@ describe('Intent', () => {
             expect(isRegisteredSpy.callCount).toBe(1);
             expect(addRegisteredSpy.callCount).toBe(1);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams["user_id"]).toBe(userId);
-                expect(req.queryParams["org.matrix.msc3202.device_id"]).toBe(deviceId);
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: { user_id: userId, "org.matrix.msc3202.device_id": deviceId },
+            }).reply(200);
 
             await Promise.all([intent.underlyingClient.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
 
         it('should impersonate the returned device ID on register', async () => {
-            const http = new HttpBackend();
-            setRequestFn(http.requestFn);
+            const hsUrl = "https://localhost";
+            const http = new HttpBackend(hsUrl);
+            http.mockAgent.enableNetConnect();
 
             const userId = "@someone:example.org";
             const botUserId = "@bot:example.org";
             const asToken = "s3cret";
-            const hsUrl = "https://localhost";
             const deviceId = "DEVICE_TEST";
             const appservice = <Appservice>{ botUserId: botUserId };
 
@@ -254,8 +262,12 @@ describe('Intent', () => {
                 },
             };
 
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({ type: "m.login.application_service", username: "someone" });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+                query: { user_id: userId },
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ type: "m.login.application_service", username: "someone" });
                 return { device_id: deviceId };
             });
 
@@ -264,23 +276,23 @@ describe('Intent', () => {
             expect(isRegisteredSpy.callCount).toBe(1);
             expect(addRegisteredSpy.callCount).toBe(1);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams["user_id"]).toBe(userId);
-                expect(req.queryParams["org.matrix.msc3202.device_id"]).toBe(deviceId);
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: { user_id: userId, "org.matrix.msc3202.device_id": deviceId },
+            }).reply(200);
 
             await Promise.all([intent.underlyingClient.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
 
         it('should gracefully handle M_USER_IN_USE', async () => {
-            const http = new HttpBackend();
-            setRequestFn(http.requestFn);
+            const hsUrl = "https://localhost";
+            const http = new HttpBackend(hsUrl);
+            http.mockAgent.enableNetConnect();
 
             const userId = "@someone:example.org";
             const botUserId = "@bot:example.org";
             const asToken = "s3cret";
-            const hsUrl = "https://localhost";
             const appservice = <Appservice>{ botUserId: botUserId };
 
             const storage = new MemoryStorageProvider();
@@ -302,8 +314,12 @@ describe('Intent', () => {
             };
 
             // HACK: 200 OK because the mock lib can't handle 400+response body
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({ type: "m.login.application_service", username: "someone" });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+                query: { user_id: userId },
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ type: "m.login.application_service", username: "someone" });
                 return { errcode: "M_USER_IN_USE", error: "User ID already in use" };
             });
 
@@ -314,13 +330,13 @@ describe('Intent', () => {
         });
 
         it('should handle unexpected errors', async () => {
-            const http = new HttpBackend();
-            setRequestFn(http.requestFn);
+            const hsUrl = "https://localhost";
+            const http = new HttpBackend(hsUrl);
+            http.mockAgent.enableNetConnect();
 
             const userId = "@someone:example.org";
             const botUserId = "@bot:example.org";
             const asToken = "s3cret";
-            const hsUrl = "https://localhost";
             const appservice = <Appservice>{ botUserId: botUserId };
 
             const storage = new MemoryStorageProvider();
@@ -341,8 +357,12 @@ describe('Intent', () => {
                 },
             };
 
-            http.when("POST", "/_matrix/client/v3/register").respond(500, (path, content) => {
-                expect(content).toMatchObject({ type: "m.login.application_service", username: "someone" });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+                query: { user_id: userId },
+            }).reply(500, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ type: "m.login.application_service", username: "someone" });
                 return { errcode: "M_UNKNOWN", error: "It broke" };
             });
 

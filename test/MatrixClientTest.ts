@@ -70,7 +70,12 @@ describe('MatrixClient', () => {
         it('should use the request function defined', async () => {
             const { client } = createTestClient();
 
-            const testFn = ((_, cb) => cb(null, { statusCode: 200 }));
+            const testFn = (() => Promise.resolve({
+                statusCode: 200,
+                body: {
+                    bytes: () => Promise.resolve(new Uint8Array()),
+                },
+            }));
             const spy = simple.spy(testFn);
             setRequestFn(spy);
 
@@ -81,8 +86,10 @@ describe('MatrixClient', () => {
         it('should reject upon error', async () => {
             const { client, http } = createTestClient();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(404, { error: "Not Found" });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(404, { error: "Not Found" });
 
             try {
                 await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
@@ -99,8 +106,10 @@ describe('MatrixClient', () => {
 
             const expectedResponse = { test: 1234 };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, expectedResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, expectedResponse);
 
             const [response] = await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
             expect(response).toMatchObject(expectedResponse);
@@ -111,8 +120,10 @@ describe('MatrixClient', () => {
 
             const expectedResponse = { test: 1234 };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, expectedResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, expectedResponse);
 
             const [response] = await Promise.all([client.doRequest("GET", "test"), http.flushAllExpected()]);
             expect(response).toMatchObject(expectedResponse);
@@ -123,11 +134,11 @@ describe('MatrixClient', () => {
 
             const expectedInput = { test: 1234 };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/test").respond(200, (path, content) => {
-                expect(content).toMatchObject(expectedInput);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                body: JSON.stringify(expectedInput),
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("PUT", "/test", null, expectedInput), http.flushAllExpected()]);
         });
@@ -137,11 +148,11 @@ describe('MatrixClient', () => {
 
             const expectedInput = { test: 1234 };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams).toMatchObject(expectedInput);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: expectedInput,
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("GET", "/test", expectedInput), http.flushAllExpected()]);
         });
@@ -149,11 +160,11 @@ describe('MatrixClient', () => {
         it('should send the access token in the Authorization header', async () => {
             const { client, http, accessToken } = createTestClient();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Authorization"]).toEqual(`Bearer ${accessToken}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                headers: { Authorization: `Bearer ${accessToken}` },
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
@@ -161,11 +172,11 @@ describe('MatrixClient', () => {
         it('should send application/json by default', async () => {
             const { client, http } = createTestClient();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Content-Type"]).toEqual("application/json");
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                headers: { "Content-Type": "application/json" },
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("PUT", "/test", null, { test: 1 }), http.flushAllExpected()]);
         });
@@ -174,17 +185,16 @@ describe('MatrixClient', () => {
             const { client, http } = createTestClient();
 
             const contentType = "testing/type";
-            const fakeJson = `{"BUFFER": "HACK"}`;
-            Buffer.isBuffer = <any>(i => i === fakeJson);
+            const body = Buffer.from(`{"key": "value"}`);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Content-Type"]).toEqual(contentType);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                headers: { "Content-Type": contentType },
+            }).reply(200, {});
 
             await Promise.all([
-                client.doRequest("PUT", "/test", null, fakeJson, 60000, false, contentType),
+                client.doRequest("PUT", "/test", null, body, 60000, false, contentType),
                 http.flushAllExpected(),
             ]);
         });
@@ -194,8 +204,10 @@ describe('MatrixClient', () => {
 
             const expectedOutput = { hello: "world" };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/test").respond(200, expectedOutput);
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+            }).reply(200, expectedOutput);
 
             const [result] = await Promise.all([
                 client.doRequest("PUT", "/test", null, {}, 60000, true),
@@ -203,6 +215,7 @@ describe('MatrixClient', () => {
             ]);
             // HACK: We can't check the body because of the mock library. Check the status code instead.
             expect(result.statusCode).toBe(200);
+            expect(result.body).toEqual(expectedOutput);
         });
 
         it('should proxy the timeout to request', async () => {
@@ -210,9 +223,12 @@ describe('MatrixClient', () => {
 
             const timeout = 10;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect((req as any).opts.timeout).toBe(timeout);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, (opts) => {
+                expect((opts as any).headersTimeout).toBe(timeout);
+                expect((opts as any).bodyTimeout).toBe(timeout);
             });
 
             await Promise.all([client.doRequest("GET", "/test", null, null, timeout), http.flushAllExpected()]);
@@ -226,11 +242,11 @@ describe('MatrixClient', () => {
             const userId = "@testing:example.org";
             client.impersonateUserId(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams["user_id"]).toBe(userId);
-                expect(req.queryParams["org.matrix.msc3202.device_id"]).toBe(undefined);
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: { user_id: userId }
+            }).reply(200);
 
             await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
@@ -242,11 +258,11 @@ describe('MatrixClient', () => {
             const deviceId = "DEVICE_TEST";
             client.impersonateUserId(userId, deviceId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams["user_id"]).toBe(userId);
-                expect(req.queryParams["org.matrix.msc3202.device_id"]).toBe(deviceId);
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: { user_id: userId, "org.matrix.msc3202.device_id": deviceId },
+            }).reply(200);
 
             await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
@@ -258,11 +274,10 @@ describe('MatrixClient', () => {
             client.impersonateUserId(userId); // set first
             client.impersonateUserId(null);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams?.["user_id"]).toBe(undefined);
-                expect(req.queryParams?.["org.matrix.msc3202.device_id"]).toBe(undefined);
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200);
 
             await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
@@ -317,7 +332,10 @@ describe('MatrixClient', () => {
                 versions: ["r0.6.1", "r0.5.0", "v1.1", "v1.2"],
             };
 
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result] = await Promise.all([client.getServerVersions(), http.flushAllExpected()]);
             expect(result).toEqual(versionsResponse);
@@ -334,7 +352,10 @@ describe('MatrixClient', () => {
                 versions: ["r0.6.1", "r0.5.0", "v1.1", "v1.2"],
             };
 
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result] = await Promise.all([client.getServerVersions(), http.flushAllExpected()]);
             expect(result).toEqual(versionsResponse);
@@ -343,7 +364,10 @@ describe('MatrixClient', () => {
 
             // clear the timer with private member access
             (<any>client).versionsLastFetched = 0;
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result3] = await Promise.all([client.getServerVersions(), http.flushAllExpected()]);
             expect(result3).toEqual(versionsResponse);
@@ -367,7 +391,10 @@ describe('MatrixClient', () => {
                 unstable_features: versions,
             };
 
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result] = await Promise.all([client.doesServerSupportUnstableFeature(flag), http.flushAllExpected()]);
             expect(result).toEqual(target);
@@ -386,7 +413,10 @@ describe('MatrixClient', () => {
                 versions: versions,
             };
 
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result] = await Promise.all([client.doesServerSupportVersion(version), http.flushAllExpected()]);
             expect(result).toEqual(target);
@@ -405,7 +435,10 @@ describe('MatrixClient', () => {
                 versions: versions,
             };
 
-            http.when("GET", "/_matrix/client/versions").respond(200, versionsResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, versionsResponse);
 
             const [result] = await Promise.all([client.doesServerSupportAnyOneVersion(searchVersions), http.flushAllExpected()]);
             expect(result).toEqual(target);
@@ -426,11 +459,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/user").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`);
-                return testToken;
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
+            }).reply(200, testToken);
 
             const [r] = await Promise.all([client.getOpenIDConnectToken(), http.flushAllExpected()]);
             expect(r).toMatchObject(<any>testToken); // <any> to fix typescript
@@ -455,11 +487,10 @@ describe('MatrixClient', () => {
             client.getUserId = () => Promise.resolve(userId);
             client.getOpenIDConnectToken = () => Promise.resolve(testToken);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/identity/v2/account").respond(200, (path) => {
-                expect(path).toEqual(`https://${identityDomain}/_matrix/identity/v2/account/register`);
-                return { token: identityToken };
-            });
+            http.mockAgent.get(`https://${identityDomain}`).intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/account/register",
+            }).reply(200, { token: identityToken });
 
             const [iClient] = await Promise.all([client.getIdentityServerClient(identityDomain), http.flushAllExpected()]);
             expect(iClient).toBeDefined();
@@ -475,11 +506,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`,
+            }).reply(200, {});
 
             await Promise.all([client.getAccountData(eventType), http.flushAllExpected()]);
         });
@@ -494,11 +524,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`,
+            }).reply(200, {});
 
             await Promise.all([client.getSafeAccountData(eventType), http.flushAllExpected()]);
         });
@@ -512,8 +541,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(404, {});
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/user\b/,
+            }).reply(404, {});
 
             const [ret] = await Promise.all([client.getSafeAccountData(eventType, defaultContent), http.flushAllExpected()]);
             expect(ret).toBe(defaultContent);
@@ -534,11 +565,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/presence").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`);
-                return presenceObj;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`,
+            }).reply(200, presenceObj);
 
             const [result] = await Promise.all([client.getPresenceStatus(), http.flushAllExpected()]);
             expect(result).toBeDefined(); // The shape of the object is handled by other tests
@@ -557,11 +587,10 @@ describe('MatrixClient', () => {
                 currently_active: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/presence").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`);
-                return presenceObj;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`,
+            }).reply(200, presenceObj);
 
             const [result] = await Promise.all([client.getPresenceStatusFor(userId), http.flushAllExpected()]);
             expect(result).toBeDefined(); // The shape of the object is handled by other tests
@@ -578,10 +607,11 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/presence").respond(200, (path, obj) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`);
-                expect(obj).toMatchObject({
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     presence: presence,
                     status_msg: message,
                 });
@@ -599,14 +629,11 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/presence").respond(200, (path, obj) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`);
-                expect(obj).toEqual({
-                    presence: presence,
-                });
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`,
+                body: JSON.stringify({ presence }),
+            }).reply(200, {});
 
             await Promise.all([client.setPresenceStatus(presence), http.flushAllExpected()]);
         });
@@ -622,12 +649,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(200, (path) => {
-                // eslint-disable-next-line max-len
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`,
+            }).reply(200, {});
 
             await Promise.all([client.getRoomAccountData(eventType, roomId), http.flushAllExpected()]);
         });
@@ -643,12 +668,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(200, (path) => {
-                // eslint-disable-next-line max-len
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`,
+            }).reply(200, {});
 
             await Promise.all([client.getSafeRoomAccountData(eventType, roomId), http.flushAllExpected()]);
         });
@@ -663,8 +686,10 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/user").respond(404, {});
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/user\b/,
+            }).reply(404, {});
 
             const [ret] = await Promise.all([client.getSafeRoomAccountData(eventType, roomId, defaultContent), http.flushAllExpected()]);
             expect(ret).toBe(defaultContent);
@@ -681,12 +706,11 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/user").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`);
-                expect(content).toMatchObject(eventContent);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`,
+                body: JSON.stringify(eventContent),
+            }).reply(200, {});
 
             await Promise.all([client.setAccountData(eventType, eventContent), http.flushAllExpected()]);
         });
@@ -703,13 +727,11 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/user").respond(200, (path, content) => {
-                // eslint-disable-next-line max-len
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`);
-                expect(content).toMatchObject(eventContent);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(eventType)}`,
+                body: JSON.stringify(eventContent),
+            }).reply(200, {});
 
             await Promise.all([client.setRoomAccountData(eventType, roomId, eventContent), http.flushAllExpected()]);
         });
@@ -721,8 +743,10 @@ describe('MatrixClient', () => {
 
             const roomId = "!abc:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms/").respond(404, {});
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/rooms\//,
+            }).reply(404, {});
 
             const [published] = await Promise.all([client.getPublishedAlias(roomId), http.flushAllExpected()]);
             expect(published).toBeFalsy();
@@ -733,8 +757,10 @@ describe('MatrixClient', () => {
 
             const roomId = "!abc:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms/").respond(200, {});
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/rooms\//,
+            }).reply(200, {});
 
             const [published] = await Promise.all([client.getPublishedAlias(roomId), http.flushAllExpected()]);
             expect(published).toBeFalsy();
@@ -747,8 +773,10 @@ describe('MatrixClient', () => {
             const alias1 = "#test1:example.org";
             const alias2 = "#test2:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms/").respond(200, {
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/rooms\//,
+            }).reply(200, {
                 alias: alias1,
                 alt_aliases: [alias2],
             });
@@ -764,8 +792,10 @@ describe('MatrixClient', () => {
             const alias1 = "#test1:example.org";
             const alias2 = "#test2:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms/").respond(200, {
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/rooms\//,
+            }).reply(200, {
                 alt_aliases: [alias2, alias1],
             });
 
@@ -781,12 +811,11 @@ describe('MatrixClient', () => {
             const alias = "#test:example.org";
             const roomId = "!abc:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/directory/room/").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`);
-                expect(content).toMatchObject({ room_id: roomId });
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+                body: JSON.stringify({ room_id: roomId }),
+            }).reply(200, {});
 
             await Promise.all([client.createRoomAlias(alias, roomId), http.flushAllExpected()]);
         });
@@ -798,11 +827,10 @@ describe('MatrixClient', () => {
 
             const alias = "#test:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("DELETE", "/_matrix/client/v3/directory/room/").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "DELETE",
+                path: `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+            }).reply(200, {});
 
             await Promise.all([client.deleteRoomAlias(alias), http.flushAllExpected()]);
         });
@@ -815,12 +843,11 @@ describe('MatrixClient', () => {
             const roomId = "!test:example.org";
             const visibility = "public";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/directory/list/room/").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/list/room/${encodeURIComponent(roomId)}`);
-                expect(content).toMatchObject({ visibility: visibility });
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/directory/list/room/${encodeURIComponent(roomId)}`,
+                body: JSON.stringify({ visibility: visibility }),
+            }).reply(200, {});
 
             await Promise.all([client.setDirectoryVisibility(roomId, visibility), http.flushAllExpected()]);
         });
@@ -832,11 +859,10 @@ describe('MatrixClient', () => {
 
             const roomId = "!test:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/directory/list/room/").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/list/room/${encodeURIComponent(roomId)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/directory/list/room/${encodeURIComponent(roomId)}`,
+            }).reply(200, {});
 
             await Promise.all([client.getDirectoryVisibility(roomId), http.flushAllExpected()]);
         });
@@ -847,8 +873,10 @@ describe('MatrixClient', () => {
             const roomId = "!test:example.org";
             const visibility = "public";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/directory/list/room/").respond(200, { visibility: visibility });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/directory/list/room/${encodeURIComponent(roomId)}`,
+            }).reply(200, { visibility: visibility });
 
             const [result] = await Promise.all([client.getDirectoryVisibility(roomId), http.flushAllExpected()]);
             expect(result).toEqual(visibility);
@@ -903,11 +931,10 @@ describe('MatrixClient', () => {
             const alias = "#test:example.org";
             const servers = ["example.org", "localhost"];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/directory/room/").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`);
-                return { room_id: roomId, servers: servers };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+            }).reply(200, { room_id: roomId, servers: servers });
 
             await Promise.all([client.lookupRoomAlias(alias), http.flushAllExpected()]);
         });
@@ -919,8 +946,10 @@ describe('MatrixClient', () => {
             const alias = "#test:example.org";
             const servers = ["example.org", "localhost"];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/directory/room/").respond(200, { room_id: roomId, servers: servers });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+            }).reply(200, { room_id: roomId, servers: servers });
 
             const [result] = await Promise.all([client.lookupRoomAlias(alias), http.flushAllExpected()]);
             expect(result).toMatchObject({ roomId: roomId, residentServers: servers });
@@ -934,10 +963,11 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const userId = "@example:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`);
-                expect(content).toMatchObject({ user_id: userId });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId });
                 return {};
             });
 
@@ -952,10 +982,11 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const userId = "@example:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`);
-                expect(content).toMatchObject({ user_id: userId });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId });
                 return {};
             });
 
@@ -969,10 +1000,11 @@ describe('MatrixClient', () => {
             const userId = "@example:example.org";
             const reason = "Excessive unit testing";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`);
-                expect(content).toMatchObject({ user_id: userId, reason: reason });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId, reason: reason });
                 return {};
             });
 
@@ -987,10 +1019,11 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const userId = "@example:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/ban`);
-                expect(content).toMatchObject({ user_id: userId });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/ban`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId });
                 return {};
             });
 
@@ -1004,10 +1037,11 @@ describe('MatrixClient', () => {
             const userId = "@example:example.org";
             const reason = "Excessive unit testing";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/ban`);
-                expect(content).toMatchObject({ user_id: userId, reason: reason });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/ban`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId, reason: reason });
                 return {};
             });
 
@@ -1022,10 +1056,11 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const userId = "@example:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/unban`);
-                expect(content).toMatchObject({ user_id: userId });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/unban`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId });
                 return {};
             });
 
@@ -1053,8 +1088,10 @@ describe('MatrixClient', () => {
                 device_id: "DEVICE",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/account/whoami").respond(200, response);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/account/whoami",
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getUserId(), http.flushAllExpected()]);
             expect(result).toEqual(userId);
@@ -1070,8 +1107,10 @@ describe('MatrixClient', () => {
                 device_id: "DEVICE",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/account/whoami").respond(200, response);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/account/whoami",
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getWhoAmI(), http.flushAllExpected()]);
             expect(result).toMatchObject(response);
@@ -1091,24 +1130,26 @@ describe('MatrixClient', () => {
             client.dms.update = dmsUpdate;
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
             const waitPromise = new Promise((resolve) => {
-                for (let i = 0; i <= max * 2; i++) {
-                    // noinspection TypeScriptValidateJSTypes
-                    http.when("GET", "/_matrix/client/v3/sync").respond(200, () => {
-                        expect(count).toBeLessThan(max + 1);
-                        count++;
-                        if (count === max) {
-                            client.stop();
+                http.mock.intercept({
+                    method: "GET",
+                    path: /^\/_matrix\/client\/v3\/sync\b/,
+                }).reply(200, () => {
+                    expect(count).toBeLessThan(max + 1);
+                    count++;
+                    if (count === max) {
+                        client.stop();
 
-                            // Wait a bit to ensure the client doesn't call /sync anymore
-                            setTimeout(resolve, 3000);
-                        }
-                        return { next_batch: "123" };
-                    });
-                }
+                        // Wait a bit to ensure the client doesn't call /sync anymore
+                        setTimeout(resolve, 3000);
+                    }
+                    return { next_batch: "123" };
+                }).times(max * 2);
             });
 
             const flush = http.flushAllExpected().catch(() => false);
@@ -1137,11 +1178,15 @@ describe('MatrixClient', () => {
             simple.mock(storage, "getFilter").returnWith({ id: 12, filter: filter });
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, () => {
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/sync\b/,
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: "123" };
             });
@@ -1172,19 +1217,23 @@ describe('MatrixClient', () => {
             });
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/user").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`);
-                expect(content).toMatchObject(filter);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(filter);
                 return { filter_id: filterId };
             });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req.queryParams.filter).toBe(filterId);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?filter=${filterId}(&.*)?$`),
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: "123" };
             });
@@ -1216,19 +1265,23 @@ describe('MatrixClient', () => {
             });
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/user").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`);
-                expect(content).toMatchObject(filter);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(filter);
                 return { filter_id: filterId };
             });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req.queryParams.filter).toBe(filterId);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?filter=${filterId}`),
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: "123" };
             });
@@ -1255,13 +1308,15 @@ describe('MatrixClient', () => {
             simple.mock(storage, "getFilter").returnWith({ id: filterId, filter: filter });
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-                expect(req.queryParams.filter).toEqual(filterId);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?filter=${filterId}`),
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: "1234" };
             });
@@ -1293,19 +1348,20 @@ describe('MatrixClient', () => {
             }));
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-                expect(req.queryParams.since).toBeUndefined();
-                return { next_batch: secondToken };
-            });
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-                expect(req.queryParams.since).toEqual(secondToken);
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/sync\b(?!.*[?&]since=)/,
+            }).reply(200, { next_batch: secondToken });
+
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?since=${secondToken}`),
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: secondToken };
             });
@@ -1339,16 +1395,16 @@ describe('MatrixClient', () => {
             }));
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-
-                expect(req.queryParams.since).toEqual(syncToken);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?since=${syncToken}`),
+            }).reply(200, () => {
                 client.stop();
-
                 return { next_batch: syncToken };
             });
 
@@ -1375,20 +1431,22 @@ describe('MatrixClient', () => {
             simple.mock(storage, "getFilter").returnWith({ id: filterId, filter: filter });
 
             // The sync handler checks which rooms it should ignore
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, { joined_rooms: [] });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/joined_rooms",
+            }).reply(200, { joined_rooms: [] });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-                expect(req.queryParams.presence).toBeUndefined();
+            http.mock.intercept({
+                method: "GET",
+                path: /^\/_matrix\/client\/v3\/sync\b(?!.*[?&]presence=)/,
+            }).reply(200, () => {
                 client.syncingPresence = presence;
                 return { next_batch: "testing" };
             });
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
-                expect(req).toBeDefined();
-                expect(req.queryParams.presence).toEqual(presence);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/sync\\?(.*&)?presence=${presence}`),
+            }).reply(200, () => {
                 client.stop();
                 return { next_batch: "testing" };
             });
@@ -2350,11 +2408,10 @@ describe('MatrixClient', () => {
             const eventId = "$example:example.org";
             const event = { type: "m.room.message" };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2376,11 +2433,10 @@ describe('MatrixClient', () => {
 
             client.addPreprocessor(processor);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2418,11 +2474,10 @@ describe('MatrixClient', () => {
             });
             (<any>client).processEvent = processSpy;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(decrypted);
@@ -2462,11 +2517,10 @@ describe('MatrixClient', () => {
             });
             (<any>client).processEvent = processSpy;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2484,11 +2538,10 @@ describe('MatrixClient', () => {
             const eventId = "$example:example.org";
             const event = { type: "m.room.message" };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRawEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2510,11 +2563,10 @@ describe('MatrixClient', () => {
 
             client.addPreprocessor(processor);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRawEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2552,11 +2604,10 @@ describe('MatrixClient', () => {
             });
             (<any>client).processEvent = processSpy;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRawEvent(roomId, eventId), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2573,11 +2624,10 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const events = [{ type: "m.room.message" }, { type: "m.room.not_message" }];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`);
-                return events;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`,
+            }).reply(200, events);
 
             const [result] = await Promise.all([client.getRoomState(roomId), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -2602,11 +2652,10 @@ describe('MatrixClient', () => {
 
             client.addPreprocessor(processor);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`);
-                return events;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`,
+            }).reply(200, events);
 
             const [result] = await Promise.all([client.getRoomState(roomId), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -2629,11 +2678,10 @@ describe('MatrixClient', () => {
         const stateKey = "testing";
         it('should call the right endpoint with an empty state key', async () => {
             const { client, http, hsUrl } = createTestClient();
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2642,11 +2690,10 @@ describe('MatrixClient', () => {
         it('should call the right endpoint with a state key', async () => {
             const { client, http, hsUrl } = createTestClient();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`,
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRoomStateEventContent(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2660,12 +2707,14 @@ describe('MatrixClient', () => {
         const event = { roomId, type: eventType, content: { name: "My name" }, state_key: stateKey };
         it('should call the right endpoint with an empty state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, { versions: ["v1.16"] } satisfies ServerVersions);
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`),
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2673,13 +2722,15 @@ describe('MatrixClient', () => {
 
         it('should call the right endpoint with a state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${stateKey}(\\?.*)?$`),
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2687,7 +2738,10 @@ describe('MatrixClient', () => {
 
         it('should process events with no state key', async () => {
             const { client, http, hsUrl } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: ["v1.16"] } satisfies ServerVersions);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, { versions: ["v1.16"] } satisfies ServerVersions);
 
             const processor = <IPreprocessor>{
                 processEvent: (ev, procClient, kind?) => {
@@ -2699,11 +2753,10 @@ describe('MatrixClient', () => {
 
             client.addPreprocessor(processor);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                return event;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`),
+            }).reply(200, event);
 
             const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, ""), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2712,12 +2765,15 @@ describe('MatrixClient', () => {
 
         it('should call the fallback endpoint with a state key', async () => {
             const { client, http } = createTestClient(undefined, undefined, undefined, { precacheVersions: false });
-            http.when("GET", "/_matrix/client/versions").respond(200, { versions: [] } satisfies ServerVersions);
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, { versions: [] } satisfies ServerVersions);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`).respond(200, () => {
-                return [event];
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`,
+            }).reply(200, () => [event]);
 
             const [result] = await Promise.all([client.getRoomStateEventBody(roomId, eventType, stateKey), http.flushAllExpected()]);
             expect(result).toMatchObject(event);
@@ -2749,16 +2805,15 @@ describe('MatrixClient', () => {
             const roomId = "!abc123:example.org";
             const limit = 2;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/context/${encodeURIComponent(targetEvent.eventId)}`);
-                expect(req.queryParams['limit']).toEqual(limit);
-                return {
-                    event: targetEvent,
-                    events_before: before,
-                    events_after: after,
-                    state: state,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/context/${encodeURIComponent(targetEvent.eventId)}`,
+                query: { limit },
+            }).reply(200, {
+                event: targetEvent,
+                events_before: before,
+                events_after: after,
+                state: state,
             });
 
             const [result] = await Promise.all([client.getEventContext(roomId, targetEvent.eventId, limit), http.flushAllExpected()]);
@@ -2796,15 +2851,13 @@ describe('MatrixClient', () => {
             const eventId = "$def456:example.org";
             const originServerTs = 4567;
 
-            http.when("GET", "/_matrix/client/v1/rooms").respond(200, (path, _content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/timestamp_to_event`);
-                expect(req.queryParams['dir']).toEqual(dir);
-                expect(req.queryParams['ts']).toEqual(timestamp);
-
-                return {
-                    event_id: eventId,
-                    origin_server_ts: originServerTs,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/timestamp_to_event`,
+                query: { dir, ts: timestamp },
+            }).reply(200, {
+                event_id: eventId,
+                origin_server_ts: originServerTs,
             });
 
             const [result] = await Promise.all([client.getEventNearestToTimestamp(roomId, timestamp, dir), http.flushAllExpected()]);
@@ -2821,11 +2874,10 @@ describe('MatrixClient', () => {
             const userId = "@testing:example.org";
             const profile = { displayname: "testing", avatar_url: "testing", extra: "testing" };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/profile").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}`);
-                return profile;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}`,
+            }).reply(200, profile);
 
             const [result] = await Promise.all([client.getUserProfile(userId), http.flushAllExpected()]);
             expect(result).toMatchObject(profile);
@@ -2838,11 +2890,10 @@ describe('MatrixClient', () => {
 
             const roomId = "!something:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/createRoom").respond(200, (path, content) => {
-                expect(content).toMatchObject({});
-                return { room_id: roomId };
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/createRoom",
+            }).reply(200, { room_id: roomId });
 
             const [result] = await Promise.all([client.createRoom(), http.flushAllExpected()]);
             expect(result).toEqual(roomId);
@@ -2857,9 +2908,11 @@ describe('MatrixClient', () => {
                 preset: "public_chat",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/createRoom").respond(200, (path, content) => {
-                expect(content).toMatchObject(properties);
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/createRoom",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(properties);
                 return { room_id: roomId };
             });
 
@@ -2877,10 +2930,11 @@ describe('MatrixClient', () => {
 
             (<any>client).userId = userId; // avoid /whoami lookup
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`);
-                expect(content).toMatchObject({ displayname: displayName });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ displayname: displayName });
                 return {};
             });
 
@@ -2897,10 +2951,11 @@ describe('MatrixClient', () => {
 
             (<any>client).userId = userId; // avoid /whoami lookup
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`);
-                expect(content).toMatchObject({ avatar_url: displayName });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ avatar_url: displayName });
                 return {};
             });
 
@@ -2916,10 +2971,11 @@ describe('MatrixClient', () => {
 
             (<any>client).userId = "@joins:example.org"; // avoid /whoami lookup
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/join").respond(200, (path, content) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({});
                 return { room_id: roomId };
             });
 
@@ -2935,16 +2991,12 @@ describe('MatrixClient', () => {
 
             (<any>client).userId = "@joins:example.org"; // avoid /whoami lookup
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/join").respond(200, (path, content, req) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`);
-                expect(req.queryParams['server_name'].length).toEqual(serverNames.length);
-                for (let i = 0; i < serverNames.length; i++) {
-                    expect(req.queryParams['server_name'][i]).toEqual(serverNames[i]);
-                }
-                return { room_id: roomId };
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+                query: { server_name: serverNames },
+                body: JSON.stringify({}),
+            }).reply(200, { room_id: roomId });
 
             const [result] = await Promise.all([client.joinRoom(roomId, serverNames), http.flushAllExpected()]);
             expect(result).toEqual(roomId);
@@ -2958,10 +3010,11 @@ describe('MatrixClient', () => {
 
             (<any>client).userId = "@joins:example.org"; // avoid /whoami lookup
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/join").respond(200, (path, content) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/join/${encodeURIComponent(roomAlias)}`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/join/${encodeURIComponent(roomAlias)}`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({});
                 return { room_id: roomId };
             });
 
@@ -2987,10 +3040,11 @@ describe('MatrixClient', () => {
 
             const strategySpy = simple.mock(strategy, "joinRoom").callOriginal();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/join").respond(200, (path, content) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({});
                 return { room_id: roomId };
             });
 
@@ -3018,10 +3072,11 @@ describe('MatrixClient', () => {
 
             const strategySpy = simple.mock(strategy, "joinRoom").callOriginal();
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/join").respond(200, (path, content) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({});
                 return { room_id: roomId };
             });
 
@@ -3037,11 +3092,10 @@ describe('MatrixClient', () => {
 
             const roomIds = ["!abc:example.org", "!123:example.org"];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/joined_rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/joined_rooms`);
-                return { joined_rooms: roomIds };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/joined_rooms`,
+            }).reply(200, { joined_rooms: roomIds });
 
             const [result] = await Promise.all([client.getJoinedRooms(), http.flushAllExpected()]);
             expectArrayEquals(roomIds, result);
@@ -3055,9 +3109,10 @@ describe('MatrixClient', () => {
             const roomId = "!testing:example.org";
             const members = ["@alice:example.org", "@bob:example.org"];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`);
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+            }).reply(200, (opts) => {
                 const obj = {};
                 for (const member of members) obj[member] = { membership: "join" };
                 return { joined: obj };
@@ -3083,11 +3138,10 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, path => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`);
-                return { joined: members };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+            }).reply(200, { joined: members });
 
             const [result] = await Promise.all([client.getJoinedRoomMembersWithProfiles(roomId), http.flushAllExpected()]);
             expect(result).toEqual(members);
@@ -3117,11 +3171,10 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembers(roomId), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3155,12 +3208,11 @@ describe('MatrixClient', () => {
             ];
             const atToken = "test_token";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect(req.queryParams.at).toEqual(atToken);
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: {at: atToken},
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembers(roomId, atToken), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3195,24 +3247,21 @@ describe('MatrixClient', () => {
             const forMemberships: Membership[] = ['join', 'leave'];
             const forNotMemberships: Membership[] = ['ban'];
 
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toEqual("join");
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                return { chunk: [memberEvents[0]] };
-            });
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toEqual("leave");
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                return { chunk: [memberEvents[1]] };
-            });
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toBeFalsy();
-                expect((req.queryParams as any).not_membership).toEqual("ban");
-                return { chunk: [] };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { membership: "join" },
+            }).reply(200, { chunk: [memberEvents[0]] });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { membership: "leave" },
+            }).reply(200, { chunk: [memberEvents[1]] });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { not_membership: "ban" },
+            }).reply(200, { chunk: [] });
 
             const [result] = await Promise.all([client.getRoomMembers(roomId, null, forMemberships, forNotMemberships), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3240,14 +3289,11 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toEqual("join");
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                expect((req.queryParams as any).at).toBeFalsy();
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { membership: "join" },
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembersByMembership(roomId, "join"), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3272,14 +3318,11 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toEqual("join");
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                expect((req.queryParams as any).at).toEqual(batchToken);
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { membership: "join", at: batchToken },
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembersByMembership(roomId, "join", batchToken), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3305,14 +3348,11 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toBeFalsy();
-                expect((req.queryParams as any).not_membership).toEqual("join");
-                expect((req.queryParams as any).at).toBeFalsy();
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { not_membership: "join" },
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembersWithoutMembership(roomId, "join"), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3337,14 +3377,11 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toBeFalsy();
-                expect((req.queryParams as any).not_membership).toEqual("join");
-                expect((req.queryParams as any).at).toEqual(batchToken);
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { not_membership: "join", at: batchToken },
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getRoomMembersWithoutMembership(roomId, "join", batchToken), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3377,14 +3414,10 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toBeFalsy();
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                expect((req.queryParams as any).at).toBeFalsy();
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getAllRoomMembers(roomId), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3418,14 +3451,11 @@ describe('MatrixClient', () => {
                 },
             ];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`);
-                expect((req.queryParams as any).membership).toBeFalsy();
-                expect((req.queryParams as any).not_membership).toBeFalsy();
-                expect((req.queryParams as any).at).toEqual(batchToken);
-                return { chunk: memberEvents };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+                query: { at: batchToken },
+            }).reply(200, { chunk: memberEvents });
 
             const [result] = await Promise.all([client.getAllRoomMembers(roomId, batchToken), http.flushAllExpected()]);
             expect(result).toBeDefined();
@@ -3443,10 +3473,11 @@ describe('MatrixClient', () => {
 
             const roomId = "!testing:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(content).toEqual({});
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({});
                 return {};
             });
 
@@ -3458,10 +3489,11 @@ describe('MatrixClient', () => {
             const roomId = "!testing:example.org";
             const reason = "I am done testing here";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(content).toEqual({ reason });
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`);
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toEqual({ reason });
                 return {};
             });
 
@@ -3475,11 +3507,10 @@ describe('MatrixClient', () => {
 
             const roomId = "!testing:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/forget`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/forget`,
+            }).reply(200, {});
 
             await Promise.all([client.forgetRoom(roomId), http.flushAllExpected()]);
         });
@@ -3492,11 +3523,10 @@ describe('MatrixClient', () => {
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`,
+            }).reply(200, {});
 
             await Promise.all([client.sendReadReceipt(roomId, eventId), http.flushAllExpected()]);
         });
@@ -3513,10 +3543,11 @@ describe('MatrixClient', () => {
 
             client.getUserId = () => Promise.resolve(userId);
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/typing/${encodeURIComponent(userId)}`);
-                expect(content).toMatchObject({ typing: typing, timeout: timeout });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/typing/${encodeURIComponent(userId)}`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ typing: typing, timeout: timeout });
                 return {};
             });
 
@@ -3553,11 +3584,11 @@ describe('MatrixClient', () => {
                 "formatted_body": replyHtml,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3605,11 +3636,11 @@ describe('MatrixClient', () => {
                 return expectedContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3647,11 +3678,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3684,11 +3715,11 @@ describe('MatrixClient', () => {
                 "body": replyText,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3726,11 +3757,11 @@ describe('MatrixClient', () => {
                 "formatted_body": replyHtml,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3778,11 +3809,11 @@ describe('MatrixClient', () => {
                 return expectedContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3820,11 +3851,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3862,11 +3893,11 @@ describe('MatrixClient', () => {
                 "formatted_body": replyHtml,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3914,11 +3945,11 @@ describe('MatrixClient', () => {
                 return expectedContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3956,11 +3987,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -3993,11 +4024,11 @@ describe('MatrixClient', () => {
                 "body": replyText,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -4035,11 +4066,11 @@ describe('MatrixClient', () => {
                 "formatted_body": replyHtml,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -4087,11 +4118,11 @@ describe('MatrixClient', () => {
                 return expectedContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -4129,11 +4160,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedContent);
                 return { event_id: eventId };
             });
 
@@ -4153,11 +4184,11 @@ describe('MatrixClient', () => {
                 msgtype: "m.notice",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4188,11 +4219,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4212,11 +4243,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4238,11 +4269,11 @@ describe('MatrixClient', () => {
                 formatted_body: "<h1>Hello World</h1>",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4275,11 +4306,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4301,11 +4332,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4325,11 +4356,11 @@ describe('MatrixClient', () => {
                 msgtype: "m.text",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4360,11 +4391,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4384,11 +4415,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4410,11 +4441,11 @@ describe('MatrixClient', () => {
                 formatted_body: "<h1>Hello World</h1>",
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4447,11 +4478,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4473,11 +4504,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4498,11 +4529,11 @@ describe('MatrixClient', () => {
                 sample: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4534,11 +4565,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.encrypted/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4559,11 +4590,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4584,11 +4615,11 @@ describe('MatrixClient', () => {
                 sample: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4621,11 +4652,11 @@ describe('MatrixClient', () => {
                 return eventContent as any;
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(sEventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(sEventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4646,11 +4677,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => false; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4671,11 +4702,11 @@ describe('MatrixClient', () => {
                 sample: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4696,11 +4727,11 @@ describe('MatrixClient', () => {
 
             client.crypto.isRoomEncrypted = async () => true; // for this test
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4723,11 +4754,11 @@ describe('MatrixClient', () => {
                 sample: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4748,11 +4779,11 @@ describe('MatrixClient', () => {
                 sample: true,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -4769,11 +4800,11 @@ describe('MatrixClient', () => {
             const eventId = "$something:example.org";
             const reason = "Zvarri!";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject({ reason });
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ reason });
                 return { event_id: eventId };
             });
 
@@ -5642,19 +5673,18 @@ describe('MatrixClient', () => {
         it('should call the right endpoint', async () => {
             const { client, http } = createTestClient();
 
-            const data = <Buffer>(<any>`{"hello":"world"}`); // we can't use a real buffer because of the mock library
+            const data = Buffer.from(`{"hello":"world"}`);
             const contentType = "test/type";
             const filename = null;
             const uri = "mxc://example.org/testing";
 
-            Buffer.isBuffer = <any>(i => i === data);
-
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/media/v3/upload").respond(200, (path, content, req) => {
-                expect(content).toBeDefined();
-                expect(req.queryParams.filename).toEqual(filename);
-                expect(req.headers["Content-Type"]).toEqual(contentType);
-                expect(req.rawData).toEqual(data);
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/media/v3/upload",
+                query: { filename },
+                headers: { "Content-Type": contentType },
+            }).reply(200, (opts) => {
+                expect(opts.body).toEqual(data);
                 return { content_uri: uri };
             });
 
@@ -5665,19 +5695,18 @@ describe('MatrixClient', () => {
         it('should use the right filename', async () => {
             const { client, http } = createTestClient();
 
-            const data = <Buffer>(<any>`{"hello":"world"}`); // we can't use a real buffer because of the mock library
+            const data = Buffer.from(`{"hello":"world"}`);
             const contentType = "test/type";
             const filename = "example.jpg";
             const uri = "mxc://example.org/testing";
 
-            Buffer.isBuffer = <any>(i => i === data);
-
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/media/v3/upload").respond(200, (path, content, req) => {
-                expect(content).toBeDefined();
-                expect(req.queryParams.filename).toEqual(filename);
-                expect(req.headers["Content-Type"]).toEqual(contentType);
-                expect(req.rawData).toEqual(data);
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/media/v3/upload",
+                query: { filename },
+                headers: { "Content-Type": contentType },
+            }).reply(200, (opts) => {
+                expect(opts.body).toEqual(data);
                 return { content_uri: uri };
             });
 
@@ -5691,27 +5720,17 @@ describe('MatrixClient', () => {
             const { client, http } = createTestClient();
             const urlPart = "example.org/testing";
             const mxcUrl = "mxc://" + urlPart;
-            // const fileContents = Buffer.from("12345");
+            const fileContents = Buffer.from("12345");
+            const contentType = "test/test";
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v1/media/download/").respond(200, (path, _, req) => {
-                expect(path).toContain("/_matrix/client/v1/media/download/" + urlPart);
-                expect((req as any).opts.encoding).toEqual(null);
-                // TODO: Honestly, I have no idea how to coerce the mock library to return headers or buffers,
-                // so this is left as a fun activity.
-                // return {
-                //     body: fileContents,
-                //     headers: {
-                //         "content-type": "test/test",
-                //     },
-                // };
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: new RegExp(`^/_matrix/client/v1/media/download/${urlPart}\\b`),
+            }).reply(200, fileContents, { headers: { "content-type": contentType } });
 
-            // Due to the above problem, the output of this won't be correct, so we cannot verify it.
             const [res] = await Promise.all([client.downloadContent(mxcUrl), http.flushAllExpected()]);
-            expect(Object.keys(res)).toContain("data");
-            expect(Object.keys(res)).toContain("contentType");
+            expect(res.data).toEqual(fileContents);
+            expect(res.contentType).toEqual("test/test");
         });
     });
 
@@ -5719,23 +5738,21 @@ describe('MatrixClient', () => {
         it('should download then upload the content', async () => {
             const { client, http, hsUrl } = createTestClient();
 
-            const data = <Buffer>(<any>`{"hello":"world"}`); // we can't use a real buffer because of the mock library
+            const data = Buffer.from(`{"hello":"world"}`);
             const uri = "mxc://example.org/testing";
 
-            Buffer.isBuffer = <any>(i => i === data);
+            http.mock.intercept({
+                method: "GET",
+                path: "/sample/download",
+            }).reply(200, data, { headers: { "content-type": "application/json" } });
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/sample/download").respond(200, () => {
-                // We can't override headers, so don't bother
-                return data;
-            });
-
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/media/v3/upload").respond(200, (path, content, req) => {
-                expect(content).toBeDefined();
-                // HACK: We know the mock library will return JSON
-                expect(req.headers["Content-Type"]).toEqual("application/json");
-                //expect(req.opts.body).toEqual(data); // XXX: We can't verify that the content was uploaded correctly
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/media/v3/upload",
+                query: { filename: null },
+                headers: { "Content-Type": "application/json" },
+            }).reply(200, (opts) => {
+                expect(opts.body).toEqual(data);
                 return { content_uri: uri };
             });
 
@@ -5752,8 +5769,11 @@ describe('MatrixClient', () => {
             const newRoomVersion = "any-ver";
             const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
-            http.when("POST", `/_matrix/client/v3/rooms/${encodeURIComponent(oldRoomId)}/upgrade`).respond(200, (path, content) => {
-                expect(content).toMatchObject({ new_version: newRoomVersion });
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/v3/rooms/${encodeURIComponent(oldRoomId)}/upgrade`,
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ new_version: newRoomVersion });
                 return { replacement_room: newRoomId };
             });
 
@@ -6564,9 +6584,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/createRoom").respond(200, (path, content) => {
-                expect(content).toMatchObject(expectedRequest);
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/createRoom",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedRequest);
                 return { room_id: roomId };
             });
 
@@ -6612,9 +6634,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/createRoom").respond(200, (path, content) => {
-                expect(content).toMatchObject(expectedRequest);
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/createRoom",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedRequest);
                 return { room_id: roomId };
             });
 
@@ -6730,9 +6754,11 @@ describe('MatrixClient', () => {
                 [OTKAlgorithm.Unsigned]: 14,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/upload").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/upload",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     one_time_keys: keys,
                 });
                 return { one_time_key_counts: counts };
@@ -6765,9 +6791,11 @@ describe('MatrixClient', () => {
                 [OTKAlgorithm.Unsigned]: 14,
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/upload").respond(200, (path, content) => {
-                expect(content).toMatchObject({});
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/upload",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({});
                 return { one_time_key_counts: counts };
             });
 
@@ -6800,9 +6828,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/query").respond(200, (path, content) => {
-                expect(content).toMatchObject({ timeout, device_keys: requestBody });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ timeout, device_keys: requestBody });
                 return response;
             });
 
@@ -6833,9 +6863,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/query").respond(200, (path, content) => {
-                expect(content).toMatchObject({ timeout: 10000, device_keys: requestBody });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ timeout: 10000, device_keys: requestBody });
                 return response;
             });
 
@@ -6884,9 +6916,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/claim").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/claim",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     timeout: 10000,
                     one_time_keys: request,
                 });
@@ -6926,9 +6960,11 @@ describe('MatrixClient', () => {
 
             const timeout = 60;
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("POST", "/_matrix/client/v3/keys/claim").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/claim",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     timeout: timeout,
                     one_time_keys: request,
                 });
@@ -6959,11 +6995,11 @@ describe('MatrixClient', () => {
                 },
             };
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("PUT", "/_matrix/client/v3/sendToDevice").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/sendToDevice/${encodeURIComponent(type)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject({ messages });
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/sendToDevice/${encodeURIComponent(type)}/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ messages });
                 return {};
             });
 
@@ -6978,10 +7014,10 @@ describe('MatrixClient', () => {
 
             const devices = ["schema not followed for simplicity"];
 
-            // noinspection TypeScriptValidateJSTypes
-            http.when("GET", "/_matrix/client/v3/devices").respond(200, () => {
-                return { devices };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/devices",
+            }).reply(200, { devices });
 
             const [res] = await Promise.all([client.getOwnDevices(), http.flushAllExpected()]);
             expect(res).toMatchObject(devices);
@@ -7006,12 +7042,13 @@ describe('MatrixClient', () => {
                 ],
             };
 
-            http.when("GET", "/_matrix/client/v1/rooms").respond(200, (path, content) => {
-                const relTypeComponent = relType ? `/${encodeURIComponent(relType)}` : '';
-                const eventTypeComponent = eventType ? `/${encodeURIComponent(eventType)}` : '';
-                // eslint-disable-next-line max-len
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}${relTypeComponent}${eventTypeComponent}`);
-                expect(idx).toBe(0);
+            const relTypeComponent = relType ? `/${encodeURIComponent(relType)}` : '';
+            const eventTypeComponent = eventType ? `/${encodeURIComponent(eventType)}` : '';
+
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}${relTypeComponent}${eventTypeComponent}`,
+            }).reply(200, (opts) => {
                 return response;
             });
 

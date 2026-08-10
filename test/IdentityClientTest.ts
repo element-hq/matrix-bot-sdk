@@ -1,17 +1,20 @@
 import * as simple from "simple-mock";
 
 import { IdentityClient, MatrixClient, setRequestFn, Threepid } from "../src";
-import HttpBackend from './MatrixMockRequest';
-import { createTestClient } from "./TestUtils";
+import { createTestClient, type HttpBackend } from "./TestUtils";
 
 export async function createTestIdentityClient(): Promise<{ client: IdentityClient, mxClient: MatrixClient, http: HttpBackend, identityUrl: string, accessToken: string }> {
     const result = createTestClient();
     const mxClient = result.client;
 
     const idServer = "id.example.org";
+    result.http.mock = result.http.mockAgent.get(`https://${idServer}`);
 
     const idAccessToken = "t0ken";
-    result.http.when("POST", "/_matrix/identity/v2/account/register").respond(200, { token: idAccessToken });
+    result.http.mock.intercept({
+        method: "POST",
+        path: "/_matrix/identity/v2/account/register",
+    }).reply(200, { token: idAccessToken });
     mxClient.getOpenIDConnectToken = () => Promise.resolve({
         access_token: "s3cret",
         expires_in: 1200,
@@ -37,10 +40,10 @@ describe('IdentityClient', () => {
                 user_id: "@alice:example.org",
             };
 
-            http.when("GET", "/_matrix/identity/v2/account").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/account`);
-                return accountResponse;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/identity/v2/account`,
+            }).reply(200, accountResponse);
 
             const [resp] = await Promise.all([client.getAccount(), http.flushAllExpected()]);
             expect(resp).toMatchObject(accountResponse);
@@ -74,10 +77,10 @@ describe('IdentityClient', () => {
                 },
             };
 
-            http.when("GET", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/identity/v2/terms`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getTermsOfService(), http.flushAllExpected()]);
             expect(result).toEqual(response);
@@ -90,11 +93,11 @@ describe('IdentityClient', () => {
 
             const urls = ["https://terms.example.org/v1/en/test1", "https://terms.example.org/v1/en/test2"];
 
-            http.when("POST", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                expect(content).toMatchObject({ user_accepts: urls });
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/terms",
+                body: JSON.stringify({ user_accepts: urls }),
+            }).reply(200, {});
 
             await Promise.all([client.acceptTerms(urls), http.flushAllExpected()]);
         });
@@ -129,16 +132,16 @@ describe('IdentityClient', () => {
 
             const urls = ["https://terms.example.org/v1/en/test1", "https://terms.example.org/v1.1/en/test2"];
 
-            http.when("GET", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                return policies;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/terms",
+            }).reply(200, policies);
 
-            http.when("POST", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                expect(content).toMatchObject({ user_accepts: urls });
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/terms",
+                body: JSON.stringify({ user_accepts: urls }),
+            }).reply(200, {});
 
             await Promise.all([client.acceptAllTerms(), http.flushAllExpected()]);
         });
@@ -171,16 +174,16 @@ describe('IdentityClient', () => {
 
             const urls = ["https://terms.example.org/v1/en/test1", "https://terms.example.org/v1.1/fr/test2"];
 
-            http.when("GET", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                return policies;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/terms",
+            }).reply(200, policies);
 
-            http.when("POST", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                expect(content).toMatchObject({ user_accepts: urls });
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/terms",
+                body: JSON.stringify({ user_accepts: urls }),
+            }).reply(200, {});
 
             await Promise.all([client.acceptAllTerms(), http.flushAllExpected()]);
         });
@@ -213,16 +216,16 @@ describe('IdentityClient', () => {
 
             const urls = ["https://terms.example.org/v1/en/test1"];
 
-            http.when("GET", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                return policies;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/terms",
+            }).reply(200, policies);
 
-            http.when("POST", "/_matrix/identity/v2/terms").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/terms`);
-                expect(content).toMatchObject({ user_accepts: urls });
-                return {};
-            });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/terms",
+                body: JSON.stringify({ user_accepts: urls }),
+            }).reply(200, {});
 
             await Promise.all([client.acceptAllTerms(), http.flushAllExpected()]);
         });
@@ -244,17 +247,19 @@ describe('IdentityClient', () => {
             ];
             const mappedUserId = "@alice:example.org";
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
-            http.when("POST", "/_matrix/identity/v2/lookup").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/lookup`);
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/lookup",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     pepper: pepper,
                     algorithm: algorithms[0],
                     addresses: hashes,
@@ -287,17 +292,19 @@ describe('IdentityClient', () => {
             ];
             const mappedUserId = "@alice:example.org";
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
-            http.when("POST", "/_matrix/identity/v2/lookup").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/lookup`);
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/lookup",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     pepper: pepper,
                     algorithm: algorithms[0],
                     addresses: hashes,
@@ -330,17 +337,19 @@ describe('IdentityClient', () => {
             ];
             const mappedUserId = "@alice:example.org";
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
-            http.when("POST", "/_matrix/identity/v2/lookup").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/lookup`);
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/lookup",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     pepper: pepper,
                     algorithm: algorithms[1],
                     addresses: hashes,
@@ -373,17 +382,19 @@ describe('IdentityClient', () => {
             ];
             const mappedUserId = "@alice:example.org";
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
-            http.when("POST", "/_matrix/identity/v2/lookup").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/lookup`);
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/lookup",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     pepper: pepper,
                     algorithm: algorithms[1],
                     addresses: hashes,
@@ -411,12 +422,12 @@ describe('IdentityClient', () => {
                 { kind: "msisdn", address: "18005552067" },
             ];
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
             try {
@@ -437,12 +448,12 @@ describe('IdentityClient', () => {
                 { kind: "msisdn", address: "18005552067" },
             ];
 
-            http.when("GET", "/_matrix/identity/v2/hash_details").respond(200, (path, content) => {
-                expect(path).toEqual(`${identityUrl}/_matrix/identity/v2/hash_details`);
-                return {
-                    algorithms: algorithms,
-                    lookup_pepper: pepper,
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/identity/v2/hash_details",
+            }).reply(200, {
+                algorithms: algorithms,
+                lookup_pepper: pepper,
             });
 
             try {
@@ -458,7 +469,12 @@ describe('IdentityClient', () => {
         it('should use the request function defined', async () => {
             const { client } = await createTestIdentityClient();
 
-            const testFn = ((_, cb) => cb(null, { statusCode: 200 }));
+            const testFn = (() => Promise.resolve({
+                statusCode: 200,
+                body: {
+                    bytes: () => Promise.resolve(new Uint8Array()),
+                },
+            }));
             const spy = simple.spy(testFn);
             setRequestFn(spy);
 
@@ -468,7 +484,10 @@ describe('IdentityClient', () => {
 
         it('should reject upon error', async () => {
             const { client, http } = await createTestIdentityClient();
-            http.when("GET", "/test").respond(404, { error: "Not Found" });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(404, { error: "Not Found" });
 
             try {
                 await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
@@ -484,7 +503,10 @@ describe('IdentityClient', () => {
             const { client, http } = await createTestIdentityClient();
 
             const expectedResponse = { test: 1234 };
-            http.when("GET", "/test").respond(200, expectedResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, expectedResponse);
 
             const [response] = await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
             expect(response).toMatchObject(expectedResponse);
@@ -494,7 +516,10 @@ describe('IdentityClient', () => {
             const { client, http } = await createTestIdentityClient();
 
             const expectedResponse = { test: 1234 };
-            http.when("GET", "/test").respond(200, expectedResponse);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, expectedResponse);
 
             const [response] = await Promise.all([client.doRequest("GET", "test"), http.flushAllExpected()]);
             expect(response).toMatchObject(expectedResponse);
@@ -504,10 +529,11 @@ describe('IdentityClient', () => {
             const { client, http } = await createTestIdentityClient();
 
             const expectedInput = { test: 1234 };
-            http.when("PUT", "/test").respond(200, (path, content) => {
-                expect(content).toMatchObject(expectedInput);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                body: JSON.stringify(expectedInput),
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("PUT", "/test", null, expectedInput), http.flushAllExpected()]);
         });
@@ -516,10 +542,11 @@ describe('IdentityClient', () => {
             const { client, http } = await createTestIdentityClient();
 
             const expectedInput = { test: 1234 };
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.queryParams).toMatchObject(expectedInput);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                query: expectedInput,
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("GET", "/test", expectedInput), http.flushAllExpected()]);
         });
@@ -527,10 +554,11 @@ describe('IdentityClient', () => {
         it('should send the access token in the Authorization header', async () => {
             const { client, http, accessToken } = await createTestIdentityClient();
 
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Authorization"]).toEqual(`Bearer ${accessToken}`);
-                return {};
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+                headers: { Authorization: `Bearer ${accessToken}` },
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("GET", "/test"), http.flushAllExpected()]);
         });
@@ -538,10 +566,11 @@ describe('IdentityClient', () => {
         it('should send application/json by default', async () => {
             const { client, http } = await createTestIdentityClient();
 
-            http.when("PUT", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Content-Type"]).toEqual("application/json");
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                headers: { "Content-Type": "application/json" },
+            }).reply(200, {});
 
             await Promise.all([client.doRequest("PUT", "/test", null, { test: 1 }), http.flushAllExpected()]);
         });
@@ -550,16 +579,16 @@ describe('IdentityClient', () => {
             const { client, http } = await createTestIdentityClient();
 
             const contentType = "testing/type";
-            const fakeJson = `{"BUFFER": "HACK"}`;
-            Buffer.isBuffer = <any>(i => i === fakeJson);
+            const body = Buffer.from(`{"key": "value"}`);
 
-            http.when("PUT", "/test").respond(200, (path, content, req) => {
-                expect(req.headers["Content-Type"]).toEqual(contentType);
-                return {};
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+                headers: { "Content-Type": contentType },
+            }).reply(200, {});
 
-            await Promise.all([
-                client.doRequest("PUT", "/test", null, fakeJson, 60000, false, contentType),
+            const [result] = await Promise.all([
+                client.doRequest("PUT", "/test", null, body, 60000, false, contentType),
                 http.flushAllExpected(),
             ]);
         });
@@ -569,14 +598,17 @@ describe('IdentityClient', () => {
 
             const expectedOutput = { hello: "world" };
 
-            http.when("PUT", "/test").respond(200, expectedOutput);
+            http.mock.intercept({
+                method: "PUT",
+                path: "/test",
+            }).reply(200, expectedOutput);
 
             const [result] = await Promise.all([
                 client.doRequest("PUT", "/test", null, {}, 60000, true),
                 http.flushAllExpected(),
             ]);
-            // HACK: We can't check the body because of the mock library. Check the status code instead.
             expect(result.statusCode).toBe(200);
+            expect(result.body).toEqual(expectedOutput);
         });
 
         it('should proxy the timeout to request', async () => {
@@ -584,8 +616,12 @@ describe('IdentityClient', () => {
 
             const timeout = 10;
 
-            http.when("GET", "/test").respond(200, (path, content, req) => {
-                expect((req as any).opts.timeout).toBe(timeout);
+            http.mock.intercept({
+                method: "GET",
+                path: "/test",
+            }).reply(200, (opts) => {
+                expect((opts as any).headersTimeout).toBe(timeout);
+                expect((opts as any).bodyTimeout).toBe(timeout);
             });
 
             await Promise.all([client.doRequest("GET", "/test", null, null, timeout), http.flushAllExpected()]);
@@ -614,8 +650,11 @@ describe('IdentityClient', () => {
             client.matrixClient.getRoomStateEventContent = stateStub;
             client.matrixClient.getUserProfile = stateStub;
 
-            http.when("POST", "/_matrix/identity/v2/store-invite").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/store-invite",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     address: inviteEmail,
                     room_id: inviteRoomId,
                     medium: "email",
@@ -682,8 +721,11 @@ describe('IdentityClient', () => {
                 return Promise.resolve({ displayname: senderDisplayName, avatar_url: senderAvatarUrl });
             });
 
-            http.when("POST", "/_matrix/identity/v2/store-invite").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/store-invite",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     address: inviteEmail,
                     room_id: inviteRoomId,
                     medium: "email",
@@ -757,8 +799,11 @@ describe('IdentityClient', () => {
                 return Promise.resolve({ displayname: senderDisplayName, avatar_url: senderAvatarUrl });
             });
 
-            http.when("POST", "/_matrix/identity/v2/store-invite").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/identity/v2/store-invite",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     address: inviteEmail,
                     room_id: inviteRoomId,
                     medium: "email",

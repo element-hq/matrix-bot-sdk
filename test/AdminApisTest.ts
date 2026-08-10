@@ -1,6 +1,5 @@
 import { AdminApis, IStorageProvider, MatrixClient, WhoisInfo } from "../src";
-import HttpBackend from './MatrixMockRequest';
-import { createTestClient } from "./TestUtils";
+import { createTestClient, HttpBackend } from "./TestUtils";
 
 export function createTestAdminClient(storage: IStorageProvider = null): { client: AdminApis, mxClient: MatrixClient, http: HttpBackend, hsUrl: string, accessToken: string } {
     const result = createTestClient(storage);
@@ -33,10 +32,10 @@ describe('AdminApis', () => {
                 },
             };
 
-            http.when("GET", "/_matrix/client/v3/admin/whois").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/admin/whois/${encodeURIComponent(userId)}`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/v3/admin/whois/${encodeURIComponent(userId)}`,
+            }).reply(200, response);
 
             const result = client.whoisUser(userId);
             await http.flushAllExpected();

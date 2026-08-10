@@ -1,6 +1,5 @@
 import { IStorageProvider, MatrixClient, MSC2380MediaInfo, UnstableApis } from "../src";
-import HttpBackend from './MatrixMockRequest';
-import { createTestClient } from "./TestUtils";
+import { createTestClient, HttpBackend } from "./TestUtils";
 
 export function createTestUnstableClient(
     storage: IStorageProvider = null,
@@ -28,10 +27,10 @@ describe('UnstableApis', () => {
             const aliases = ["#test:example.org", "#test2:example.org"];
             const roomId = "!room:example.org";
 
-            http.when("GET", "/_matrix/client/unstable/org.matrix.msc2432/rooms").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/unstable/org.matrix.msc2432/rooms/${encodeURIComponent(roomId)}/aliases`);
-                return { aliases: aliases };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/unstable/org.matrix.msc2432/rooms/${encodeURIComponent(roomId)}/aliases`,
+            }).reply(200, { aliases: aliases });
 
             const [result] = await Promise.all([client.getRoomAliases(roomId), http.flushAllExpected()]);
             expect(result).toMatchObject(aliases);
@@ -54,10 +53,11 @@ describe('UnstableApis', () => {
                 },
             };
 
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.reaction/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(expectedReaction);
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.reaction/`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(expectedReaction);
                 return { event_id: newEventId };
             });
 
@@ -84,14 +84,12 @@ describe('UnstableApis', () => {
                 ],
             };
 
-            http.when("GET", "/_matrix/client/unstable/rooms").respond(200, (path, content) => {
-                const relTypeComponent = relType ? `/${encodeURIComponent(relType)}` : '';
-                const eventTypeComponent = eventType ? `/${encodeURIComponent(eventType)}` : '';
-                // eslint-disable-next-line max-len
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/unstable/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}${relTypeComponent}${eventTypeComponent}`);
-                expect(idx).toBe(0);
-                return response;
-            });
+            const relTypeComponent = relType ? `/${encodeURIComponent(relType)}` : '';
+            const eventTypeComponent = eventType ? `/${encodeURIComponent(eventType)}` : '';
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/client/unstable/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}${relTypeComponent}${eventTypeComponent}`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getRelationsForEvent(roomId, eventId, relType, eventType), http.flushAllExpected()]);
             expect(result).toEqual(response);
@@ -110,11 +108,10 @@ describe('UnstableApis', () => {
                 size: 12,
             };
 
-            http.when("GET", "/_matrix/media/unstable/info").respond(200, (path, content) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/media/unstable/info/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`);
-                expect(idx).toBe(0);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_matrix/media/unstable/info/${encodeURIComponent(domain)}/${encodeURIComponent(mediaId)}`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getMediaInfo(mxc), http.flushAllExpected()]);
             expect(result).toEqual(response);

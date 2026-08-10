@@ -1,8 +1,8 @@
 import * as tmp from "tmp";
 import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
+import { Interceptable, MockAgent, request, setGlobalDispatcher } from "undici";
 
 import { IStorageProvider, MatrixClient, OTKAlgorithm, RustSdkCryptoStorageProvider, ServerVersions, UnpaddedBase64, setRequestFn } from "../src";
-import HttpBackend from "./MatrixMockRequest";
 
 export const TEST_DEVICE_ID = "TEST_DEVICE";
 
@@ -27,6 +27,39 @@ export function testDelay(ms: number): Promise<any> {
     });
 }
 
+export class HttpBackend {
+    public mockAgent: MockAgent;
+    public mock: Interceptable;
+
+    public constructor(hsUrl: string) {
+        this.mockAgent = new MockAgent();
+        this.mockAgent.disableNetConnect();
+        this.mock = this.mockAgent.get(hsUrl);
+        setGlobalDispatcher(this.mockAgent);
+        setRequestFn(request);
+    }
+
+    public async flushAllExpected(opts?: { timeout?: number }): Promise<number> {
+        let firstCheck = false;
+        const endTime = Date.now() + (opts?.timeout ?? 1000);
+        do {
+            if (this.mockAgent.pendingInterceptors().length === 0) {
+                if (firstCheck) {
+                    // calling flushAllExpected when there are no pending interceptors is a
+                    // silly thing to do, and probably means that your test isn't
+                    // doing what you think it is doing (or it is racy). Hence we
+                    // reject this, rather than resolving immediately.
+                    throw new Error("flushAllExpected called with no pending interceptors");
+                }
+                return;
+            }
+            firstCheck = false;
+            await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        } while (Date.now() < endTime);
+        this.mockAgent.assertNoPendingInterceptors();
+    }
+}
+
 export function createTestClient(
     storage: IStorageProvider = null,
     userId: string = null,
@@ -43,12 +76,11 @@ export function createTestClient(
         precacheVersions: true,
         ...opts,
     };
-    const http = new HttpBackend();
     const hsUrl = "https://localhost";
     const accessToken = "s3cret";
     const client = new MatrixClient(hsUrl, accessToken, storage, (cryptoStoreType !== undefined) ? new RustSdkCryptoStorageProvider(tmp.dirSync().name, cryptoStoreType) : null);
     (<any>client).userId = userId; // private member access
-    setRequestFn(http.requestFn);
+    const http = new HttpBackend(hsUrl);
 
     // Force versions
     if (opts.precacheVersions) {
@@ -76,10 +108,11 @@ export async function testCryptoStores(fn: (StoreType) => Promise<void>): Promis
 }
 
 export function bindNullEngine(http: HttpBackend) {
-    http.when("POST", "/_matrix/client/v3/keys/upload").respond(200, (path, obj) => {
-        expect(obj).toMatchObject({
-
-        });
+    http.mock.intercept({
+        method: "POST",
+        path: "/_matrix/client/v3/keys/upload",
+    }).reply(200, (opts) => {
+        expect(JSON.parse(opts.body as string)).toMatchObject({});
         return {
             one_time_key_counts: {
                 // Enough to trick the OlmMachine into thinking it has enough keys
@@ -92,9 +125,10 @@ export function bindNullEngine(http: HttpBackend) {
 }
 
 export function bindNullQuery(http: HttpBackend) {
-    http.when("POST", "/_matrix/client/v3/keys/query").respond(200, (path, obj) => {
-        return {};
-    });
+    http.mock.intercept({
+        method: "POST",
+        path: "/_matrix/client/v3/keys/query",
+    }).reply(200, {});
 }
 
 /**

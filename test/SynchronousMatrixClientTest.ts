@@ -1,7 +1,7 @@
 import * as simple from "simple-mock";
+import { type Interceptable, MockAgent, request as origRequestFn, setGlobalDispatcher } from "undici";
 
 import { IStorageProvider, MatrixClient, setRequestFn, SynchronousMatrixClient } from "../src";
-import HttpBackend from './MatrixMockRequest';
 
 class TestSyncMatrixClient extends SynchronousMatrixClient {
     constructor(client: MatrixClient) {
@@ -15,12 +15,15 @@ class TestSyncMatrixClient extends SynchronousMatrixClient {
     }
 }
 
-export function createSyncTestClient(storage: IStorageProvider = null): { client: TestSyncMatrixClient, http: HttpBackend, hsUrl: string, accessToken: string } {
-    const http = new HttpBackend();
+export function createSyncTestClient(storage: IStorageProvider = null): { client: TestSyncMatrixClient, http: Interceptable, hsUrl: string, accessToken: string } {
+    const mockAgent = new MockAgent();
+    mockAgent.disableNetConnect();
+    setGlobalDispatcher(mockAgent);
+    const http = mockAgent.get(/.*/);
     const hsUrl = "https://localhost";
     const accessToken = "s3cret";
     const client = new MatrixClient(hsUrl, accessToken, storage);
-    setRequestFn(http.requestFn);
+    setRequestFn(origRequestFn);
 
     return { http, hsUrl, accessToken, client: new TestSyncMatrixClient(client) };
 }

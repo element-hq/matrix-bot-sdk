@@ -1,6 +1,5 @@
 import { MatrixAuth } from "../src";
-import HttpBackend from './MatrixMockRequest';
-import { createTestClient } from "./TestUtils";
+import { createTestClient, HttpBackend } from "./TestUtils";
 
 export function createTestAuth(): { auth: MatrixAuth, http: HttpBackend, hsUrl: string } {
     const result = createTestClient();
@@ -27,8 +26,11 @@ describe('MatrixAuth', () => {
             const password = "P@ssw0rd";
             const accessToken = "1234";
 
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({ username, password });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ username, password });
                 return { access_token: accessToken };
             });
 
@@ -50,8 +52,11 @@ describe('MatrixAuth', () => {
             const sessionId = "5678";
 
             // First is UIA
-            http.when("POST", "/_matrix/client/v3/register").respond(401, (path, content) => {
-                expect(content).toMatchObject({ username, password });
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+            }).reply(401, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({ username, password });
                 return {
                     session: sessionId,
                     flows: [
@@ -60,8 +65,11 @@ describe('MatrixAuth', () => {
                     params: {},
                 };
             });
-            http.when("POST", "/_matrix/client/v3/register").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/register",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     username,
                     password,
                     auth: {
@@ -86,8 +94,11 @@ describe('MatrixAuth', () => {
             const password = "P@ssw0rd";
             const accessToken = "1234";
 
-            http.when("POST", "/_matrix/client/v3/login").respond(200, (path, content) => {
-                expect(content).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/login",
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     type: "m.login.password",
                     identifier: {
                         type: "m.id.user",

@@ -1,54 +1,64 @@
+import * as querystring from "querystring";
+
+import type Dispatcher from "undici/types/dispatcher";
+import type { OutgoingHttpHeaders } from "undici/types/header";
 import { LogLevel, LogService } from "./logging/LogService";
 import { getRequestFn } from "./request";
 import { MatrixError } from "./models/MatrixError";
 
 let lastRequestId = 0;
 
-const defaultErrorHandler = (response, errBody) => {
+const defaultErrorHandler = (response: Dispatcher.ResponseData, errBody: any) => {
     return typeof (errBody) === "object" && 'errcode' in errBody ?
         new MatrixError(errBody, response.statusCode, response.headers) : undefined;
 };
 
 export interface DoHttpRequestOpts {
-    errorHandler?: (response, body) => Error|undefined;
+    errorHandler?: (response: Dispatcher.ResponseData, body: any) => Error|undefined;
 }
+
+export type ResponseBody<NoEncoding extends boolean> = NoEncoding extends true ? Buffer : any;
+export type RawResponse<NoEncoding extends boolean> = Omit<Dispatcher.ResponseData, "body"> & { body: ResponseBody<NoEncoding> };
 
 /**
  * Performs a web request to a server.
  * @category Unit testing
- * @param {string} baseUrl The base URL to apply to the call.
- * @param {"GET"|"POST"|"PUT"|"DELETE"} method The HTTP method to use in the request
- * @param {string} endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
- * @param {any} qs The query string to send. Optional.
- * @param {any} body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
- * @param {any} headers Additional headers to send in the request.
- * @param {number} timeout The number of milliseconds to wait before timing out.
- * @param {boolean} raw If true, the raw response will be returned instead of the response body.
- * @param {string} contentType The content type to send. Only used if the `body` is a Buffer.
- * @param {string} noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
- * @returns {Promise<any>} Resolves to the response (body), rejected if a non-2xx status code was returned.
+ * @param baseUrl The base URL to apply to the call.
+ * @param method The HTTP method to use in the request
+ * @param endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
+ * @param qs The query string to send. Optional.
+ * @param body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
+ * @param headers Additional headers to send in the request.
+ * @param timeout The number of milliseconds to wait before timing out.
+ * @param raw If true, the raw response will be returned instead of the response body.
+ * @param contentType The content type to send. Only used if the `body` is a Buffer.
+ * @param noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
+ * @returns Resolves to the response (body), rejected if a non-2xx status code was returned.
  */
-export async function doHttpRequest(
+export async function doHttpRequest<IsRaw extends boolean = false, NoEncoding extends boolean = false>(
     baseUrl: string,
     method: "GET" | "POST" | "PUT" | "DELETE",
     endpoint: string,
-    qs = null,
-    body = null,
-    headers = {},
+    qs: querystring.ParsedUrlQueryInput | null = null,
+    body: any | null = null,
+    headers: OutgoingHttpHeaders = {},
     timeout = 60000,
-    raw = false,
+    raw?: IsRaw,
     contentType = "application/json",
-    noEncoding = false,
+    noEncoding?: NoEncoding,
     opts: DoHttpRequestOpts = {
         errorHandler: defaultErrorHandler,
     },
-): Promise<any> {
+): Promise<IsRaw extends true ? RawResponse<NoEncoding> : ResponseBody<NoEncoding>> {
     if (!endpoint.startsWith('/')) {
         endpoint = '/' + endpoint;
     }
 
     const requestId = ++lastRequestId;
-    const url = baseUrl + endpoint;
+    const url = new URL(baseUrl + endpoint);
+    if (qs) {
+        url.search = querystring.stringify(qs);
+    }
 
     // This is logged at info so that when a request fails people can figure out which one.
     LogService.debug("MatrixHttpClient", "(REQ-" + requestId + ")", method + " " + url);
@@ -60,81 +70,54 @@ export async function doHttpRequest(
         if (body && Buffer.isBuffer(body)) LogService.trace("MatrixHttpClient", "(REQ-" + requestId + ")", "body = <Buffer>");
     }
 
-    const params: { uri: string, [k: string]: any } = {
-        uri: url,
-        method: method,
-        qs: qs,
-        // If this is undefined, then a string will be returned. If it's null, a Buffer will be returned.
-        encoding: noEncoding === false ? undefined : null,
-        useQuerystring: true,
-        qsStringifyOptions: {
-            options: { arrayFormat: 'repeat' },
-        },
-        timeout: timeout,
-        headers: headers,
-        // Enable KeepAlive for HTTP
-        forever: true,
-    };
-
     if (body) {
         if (Buffer.isBuffer(body)) {
-            params.headers["Content-Type"] = contentType;
-            params.body = body;
+            headers["Content-Type"] = contentType;
         } else {
-            params.headers["Content-Type"] = "application/json";
-            params.body = JSON.stringify(body);
+            headers["Content-Type"] = "application/json";
+            body = JSON.stringify(body);
         }
     }
 
-    const { response, resBody } = await new Promise<{ response: any, resBody: any }>((resolve, reject) => {
-        getRequestFn()(params, (err, res, rBody) => {
-            if (err) {
-                LogService.error("MatrixHttpClient", "(REQ-" + requestId + ")", err);
-                reject(err);
-                return;
-            }
-
-            if (typeof (rBody) === 'string') {
-                try {
-                    rBody = JSON.parse(rBody);
-                } catch (e) {
-                }
-            }
-
-            if (typeof (res.body) === 'string') {
-                try {
-                    res.body = JSON.parse(res.body);
-                } catch (e) {
-                }
-            }
-
-            resolve({ response: res, resBody: rBody });
-        });
+    const response = await getRequestFn()(url, {
+        method,
+        headersTimeout: timeout,
+        bodyTimeout: timeout,
+        headers,
+        body,
+    }).catch((e) => {
+        LogService.error("MatrixHttpClient", "(REQ-" + requestId + ")", e);
+        throw e;
     });
 
-    const respIsBuffer = (response.body instanceof Buffer);
+    let resBody: ResponseBody<NoEncoding> = Buffer.from(await response.body.bytes());
+    if (!noEncoding) {
+        resBody = resBody.toString();
+        try {
+            resBody = JSON.parse(resBody);
+        } catch {}
+    }
 
     // Check for errors.
-    const errBody = response.body || resBody;
-    const handledError = opts.errorHandler(response, errBody);
+    const handledError = opts.errorHandler(response, resBody);
     if (handledError) {
-        const redactedBody = respIsBuffer ? '<Buffer>' : redactObjectForLogging(errBody);
+        const redactedBody = noEncoding ? '<Buffer>' : redactObjectForLogging(resBody);
         LogService.error("MatrixHttpClient", "(REQ-" + requestId + ")", redactedBody);
         throw handledError;
     }
 
     // Don't log the body unless we're in debug mode. They can be large.
     if (LogService.level.includes(LogLevel.TRACE)) {
-        const redactedBody = respIsBuffer ? '<Buffer>' : redactObjectForLogging(response.body);
+        const redactedBody = noEncoding ? '<Buffer>' : redactObjectForLogging(resBody);
         LogService.trace("MatrixHttpClient", "(REQ-" + requestId + " RESP-H" + response.statusCode + ")", redactedBody);
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-        const redactedBody = respIsBuffer ? '<Buffer>' : redactObjectForLogging(response.body);
+        const redactedBody = noEncoding ? '<Buffer>' : redactObjectForLogging(resBody);
         LogService.error("MatrixHttpClient", "(REQ-" + requestId + ")", redactedBody);
         throw response;
     }
-    return raw ? response : resBody;
+    return raw ? { ...response, body: resBody } as any : resBody;
 }
 
 export function redactObjectForLogging(input: any): any {

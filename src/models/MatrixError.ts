@@ -1,3 +1,4 @@
+import type { IncomingHttpHeaders } from "undici/types/header";
 import { LogService } from "../logging/LogService";
 
 /**
@@ -41,14 +42,14 @@ export class MatrixError extends Error {
      * @param body The error body.
      * @param statusCode The HTTP status code.
      */
-    constructor(public readonly body: { errcode: string, error: string, retry_after_ms?: number }, public readonly statusCode: number, headers: Record<string, string>) {
+    constructor(public readonly body: { errcode: string, error: string, retry_after_ms?: number }, public readonly statusCode: number, headers: IncomingHttpHeaders) {
         super();
         this.errcode = body.errcode;
         this.error = body.error;
         const retryAfterHeader = headers['retry-after'];
         if (this.statusCode === 429 && retryAfterHeader) {
             try {
-                this.retryAfterMs = MatrixError.parseRetryAfterHeader(retryAfterHeader);
+                this.retryAfterMs = MatrixError.parseRetryAfterHeader(retryAfterHeader as string);
             } catch (ex) {
                 // Could not parse...skip handling for now.
                 LogService.warn("MatrixError", "Could not parse Retry-After header from request.", ex);

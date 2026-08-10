@@ -11,8 +11,7 @@ import {
     SynapseUserList,
     SynapseUserProperties,
 } from "../src";
-import HttpBackend from './MatrixMockRequest';
-import { createTestClient } from "./TestUtils";
+import { createTestClient, HttpBackend } from "./TestUtils";
 
 export function createTestSynapseAdminClient(
     storage: IStorageProvider = null,
@@ -40,10 +39,10 @@ describe('SynapseAdminApis', () => {
             const userId = "@someone:example.org";
             const response = { admin: true };
 
-            http.when("GET", "/_synapse/admin/v1/users").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.isAdmin(userId), http.flushAllExpected()]);
             expect(result).toEqual(response.admin);
@@ -55,10 +54,10 @@ describe('SynapseAdminApis', () => {
             const userId = "@someone:example.org";
             const response = { admin: false };
 
-            http.when("GET", "/_synapse/admin/v1/users").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.isAdmin(userId), http.flushAllExpected()]);
             expect(result).toEqual(response.admin);
@@ -72,13 +71,14 @@ describe('SynapseAdminApis', () => {
             const userId = "@someone:example.org";
             const response = { admin: true };
 
-            http.when("GET", "/_matrix/client/v3/account/whoami").respond(200, (path, content) => {
-                return { user_id: userId };
-            });
-            http.when("GET", "/_synapse/admin/v1/users").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/account/whoami",
+            }).reply(200, { user_id: userId });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.isSelfAdmin(), http.flushAllExpected()]);
             expect(result).toEqual(response.admin);
@@ -89,13 +89,14 @@ describe('SynapseAdminApis', () => {
 
             const userId = "@someone:example.org";
 
-            http.when("GET", "/_matrix/client/v3/account/whoami").respond(200, (path, content) => {
-                return { user_id: userId };
-            });
-            http.when("GET", "/_synapse/admin/v1/users").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`);
-                return { errcode: "M_FORBIDDEN", error: "You are not a server admin" };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/v3/account/whoami",
+            }).reply(200, { user_id: userId });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v1/users/${encodeURIComponent(userId)}/admin`,
+            }).reply(200, { errcode: "M_FORBIDDEN", error: "You are not a server admin" });
 
             const [result] = await Promise.all([client.isSelfAdmin(), http.flushAllExpected()]);
             expect(result).toEqual(false);
@@ -118,10 +119,10 @@ describe('SynapseAdminApis', () => {
                 deactivated: false,
             };
 
-            http.when("GET", "/_synapse/admin/v2/users").respond(200, (path) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users/${encodeURIComponent(userId)}`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v2/users/${encodeURIComponent(userId)}`,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.getUser(userId), http.flushAllExpected()]);
             expect(result).toEqual(response);
@@ -132,10 +133,10 @@ describe('SynapseAdminApis', () => {
 
             const userId = "@someone:example.org";
 
-            http.when("GET", "/_synapse/admin/v2/users").respond(404, (path) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users/${encodeURIComponent(userId)}`);
-                return { error: "User not found", errcode: "M_NOT_FOUND" };
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: `/_synapse/admin/v2/users/${encodeURIComponent(userId)}`,
+            }).reply(404, { error: "User not found", errcode: "M_NOT_FOUND" });
 
             try {
                 await Promise.all([client.getUser(userId), http.flushAllExpected()]);
@@ -168,11 +169,11 @@ describe('SynapseAdminApis', () => {
                 password: "foobar",
             };
 
-            http.when("PUT", "/_synapse/admin/v2/users").respond(200, (path, content) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users/${encodeURIComponent(userId)}`);
-                expect(content).toEqual(request);
-                return response;
-            });
+            http.mock.intercept({
+                method: "PUT",
+                path: `/_synapse/admin/v2/users/${encodeURIComponent(userId)}`,
+                body: JSON.stringify(request),
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.upsertUser(userId, request), http.flushAllExpected()]);
             expect(result).toEqual(response);
@@ -206,11 +207,11 @@ describe('SynapseAdminApis', () => {
                 deactivated: false,
             };
 
-            http.when("GET", "/_synapse/admin/v2/users").respond(200, (path, _content, req) => {
-                expect(req.queryParams).toEqual(request);
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_synapse/admin/v2/users",
+                query: request,
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.listUsers(
                 request.from, request.limit, request.name, request.guests, request.deactivated,
@@ -252,27 +253,27 @@ describe('SynapseAdminApis', () => {
                 deactivated: false,
             };
 
-            http.when("GET", "/_synapse/admin/v2/users").respond(200, (path, _content, req) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users`);
-                expect(req.queryParams).toEqual(request);
-                return {
-                    next_token: 'from-token',
-                    total: 2,
-                    users: [user1],
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_synapse/admin/v2/users",
+                query: request,
+            }).reply(200, {
+                next_token: 'from-token',
+                total: 2,
+                users: [user1],
             });
             const iterable = await client.listAllUsers({ name: "bar", guests: true, deactivated: false, limit: 1 });
             const flush = http.flushAllExpected();
             const resultUser1 = await iterable.next();
             expect(resultUser1).toEqual({ done: false, value: user1 });
 
-            http.when("GET", "/_synapse/admin/v2/users").respond(200, (path, _content, req) => {
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/users`);
-                expect(req.queryParams).toEqual({ ...request, from: 'from-token' });
-                return {
-                    total: 2,
-                    users: [user2],
-                };
+            http.mock.intercept({
+                method: "GET",
+                path: "/_synapse/admin/v2/users",
+                query: { ...request, from: "from-token" },
+            }).reply(200, {
+                total: 2,
+                users: [user2],
             });
             const resultUser2 = await iterable.next();
             expect(resultUser2).toEqual({ done: false, value: user2 });
@@ -317,11 +318,11 @@ describe('SynapseAdminApis', () => {
                 dir: "b",
             };
 
-            http.when("GET", "/_synapse/admin/v1/rooms").respond(200, (path, _content, req) => {
-                expect(req.queryParams).toEqual(request);
-                expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/rooms`);
-                return response;
-            });
+            http.mock.intercept({
+                method: "GET",
+                path: "/_synapse/admin/v1/rooms",
+                query: request
+            }).reply(200, response);
 
             const [result] = await Promise.all([client.listRooms(
                 request.search_term, request.from, request.limit, request.order_by, request.dir === 'b',
@@ -340,10 +341,10 @@ describe('SynapseAdminApis', () => {
                     { type: "m.room.member", content: { membership: "leave" }, state_key: "@bob:example.org" },
                 ];
 
-                http.when("GET", "/_synapse/admin/v1/rooms").respond(200, (path, _content, req) => {
-                    expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/state`);
-                    return { state };
-                });
+                http.mock.intercept({
+                    method: "GET",
+                    path: `/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/state`,
+                }).reply(200, { state });
 
                 const [result] = await Promise.all([client.getRoomState(roomId), http.flushAllExpected()]);
                 expect(result).toMatchObject(state);
@@ -356,9 +357,11 @@ describe('SynapseAdminApis', () => {
 
                 const roomId = "!room:example.org";
 
-                http.when("DELETE", "/_synapse/admin/v2/rooms").respond(200, (path, _content, req) => {
-                    expect(JSON.parse(req.rawData)).toMatchObject({ purge: true });
-                    expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}`);
+                http.mock.intercept({
+                    method: "DELETE",
+                    path: `/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}`,
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ purge: true });
                     return {};
                 });
 
@@ -399,10 +402,10 @@ describe('SynapseAdminApis', () => {
                     },
                 ];
 
-                http.when("GET", "/_synapse/admin/v2/rooms").respond(200, (path, _content, req) => {
-                    expect(path).toEqual(`${hsUrl}/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}/delete_status`);
-                    return { results: state };
-                });
+                http.mock.intercept({
+                    method: "GET",
+                    path: `/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}/delete_status`,
+                }).reply(200, { results: state });
 
                 const [result] = await Promise.all([client.getDeleteRoomState(roomId), http.flushAllExpected()]);
                 expect(result).toMatchObject(state);
@@ -418,9 +421,10 @@ describe('SynapseAdminApis', () => {
                     { token: "bar", uses_allowed: 15, pending: 5, completed: 8, expiry_time: 10000000 },
                 ];
 
-                http.when("GET", "/_synapse/admin/v1/registration_tokens").respond(200, () => {
-                    return { registration_tokens: tokens };
-                });
+                http.mock.intercept({
+                    method: "GET",
+                    path: new RegExp("^/_synapse/admin/v1/registration_tokens"),
+                }).reply(200, { registration_tokens: tokens });
 
                 const [result] = await Promise.all([client.listRegistrationTokens(), http.flushAllExpected()]);
                 expect(result).toEqual(tokens);
@@ -435,15 +439,17 @@ describe('SynapseAdminApis', () => {
                     token: "foo", uses_allowed: null, pending: 5, completed: 25, expiry_time: null,
                 };
 
-                http.when("GET", "/_synapse/admin/v1/registration_tokens/foo").respond(200, () => {
-                    return token;
-                });
+                http.mock.intercept({
+                    method: "GET",
+                    path: "/_synapse/admin/v1/registration_tokens/foo",
+                }).reply(200, token);
 
-                http.when("GET", "/_synapse/admin/v1/registration_tokens/not-a-token").respond(404, (path) => {
-                    return {
-                        errcode: "M_NOT_FOUND",
-                        error: "No such registration token: not-a-token",
-                    };
+                http.mock.intercept({
+                    method: "GET",
+                    path: "/_synapse/admin/v1/registration_tokens/not-a-token",
+                }).reply(404, {
+                    errcode: "M_NOT_FOUND",
+                    error: "No such registration token: not-a-token",
                 });
 
                 const flush = http.flushAllExpected();
@@ -470,8 +476,11 @@ describe('SynapseAdminApis', () => {
                     uses_allowed: null,
                 };
 
-                http.when("POST", "/_synapse/admin/v1/registration_tokens/new").respond(200, (_path, content) => {
-                    expect(options).toMatchObject(content);
+                http.mock.intercept({
+                    method: "POST",
+                    path: "/_synapse/admin/v1/registration_tokens/new",
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject(options);
                     return responseToken;
                 });
 
@@ -492,8 +501,11 @@ describe('SynapseAdminApis', () => {
                     uses_allowed: null,
                 };
 
-                http.when("PUT", "/_synapse/admin/v1/registration_tokens/foo").respond(200, (_path, content) => {
-                    expect(options).toMatchObject(content);
+                http.mock.intercept({
+                    method: "PUT",
+                    path: "/_synapse/admin/v1/registration_tokens/foo",
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject(options);
                     return responseToken;
                 });
 
@@ -506,9 +518,10 @@ describe('SynapseAdminApis', () => {
             it('should call the right endpoint', async () => {
                 const { client, http } = createTestSynapseAdminClient();
 
-                http.when("DELETE", "/_synapse/admin/v1/registration_tokens/foo").respond(200, () => {
-                    return {};
-                });
+                http.mock.intercept({
+                    method: "DELETE",
+                    path: "/_synapse/admin/v1/registration_tokens/foo",
+                }).reply(200, {});
 
                 await Promise.all([client.deleteRegistrationToken("foo"), http.flushAllExpected()]);
             });
@@ -521,9 +534,11 @@ describe('SynapseAdminApis', () => {
                 const roomId = "!room:example.org";
                 const userId = "@alice:example.org";
 
-                http.when("POST", "/_synapse/admin/v1/rooms").respond(200, (path, content, req) => {
-                    expect(content).toMatchObject({ user_id: userId });
-                    expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/make_room_admin`);
+                http.mock.intercept({
+                    method: "POST",
+                    path: `/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/make_room_admin`,
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ user_id: userId });
                     return {};
                 });
 
@@ -541,15 +556,13 @@ describe('SynapseAdminApis', () => {
                 const eventId = "$def456:example.org";
                 const originServerTs = 4567;
 
-                http.when("GET", "/_synapse/admin/v1/rooms").respond(200, (path, _content, req) => {
-                    expect(path).toEqual(`${hsUrl}/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/timestamp_to_event`);
-                    expect(req.queryParams['dir']).toEqual(dir);
-                    expect(req.queryParams['ts']).toEqual(timestamp);
-
-                    return {
-                        event_id: eventId,
-                        origin_server_ts: originServerTs,
-                    };
+                http.mock.intercept({
+                    method: "GET",
+                    path: `/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/timestamp_to_event`,
+                    query: { dir, ts: timestamp },
+                }).reply(200, {
+                    event_id: eventId,
+                    origin_server_ts: originServerTs,
                 });
 
                 const [result] = await Promise.all([client.getEventNearestToTimestamp(roomId, timestamp, dir), http.flushAllExpected()]);
