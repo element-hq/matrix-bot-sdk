@@ -811,6 +811,10 @@ describe('CryptoClient', () => {
             }).times(5);
             http2.mock.intercept({
                 method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, {});
+            http2.mock.intercept({
+                method: "POST",
                 path: "/_matrix/client/v3/keys/signatures/upload",
             }).reply(200, {});
             await Promise.all([
