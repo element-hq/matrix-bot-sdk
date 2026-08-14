@@ -792,6 +792,9 @@ describe('CryptoClient', () => {
                     return accountData[name];
                 });
             }
+            http2.when("POST", "/keys/query").respond(200, (path, obj) => {
+                return {};
+            });
             http2.when("POST", "/keys/signatures/upload").respond(200, (path, obj) => {
                 return {};
             });
