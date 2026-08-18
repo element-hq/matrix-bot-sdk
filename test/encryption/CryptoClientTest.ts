@@ -1,8 +1,7 @@
 import * as simple from "simple-mock";
 
 import { EncryptedFile, EncryptionAlgorithm, IOlmEncrypted, IToDeviceMessage, MatrixClient, MembershipEvent, OTKAlgorithm, RoomEncryptionAlgorithm } from "../../src";
-import HttpBackend from '../MatrixMockRequest';
-import { bindNullEngine, createTestClient, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
+import { bindNullEngine, createTestClient, HttpBackend, testCryptoStores, TEST_DEVICE_ID } from "../TestUtils";
 
 describe('CryptoClient', () => {
     it('should not have a device ID or be ready until prepared', () => testCryptoStores(async (cryptoStoreType) => {
@@ -672,8 +671,12 @@ describe('CryptoClient', () => {
             // Initialize the crypto client.
             client1.getWhoAmI = () => Promise.resolve({ user_id: userId, device_id: TEST_DEVICE_ID+"1" });
             const deviceKeys: Record<string, any> = {};
-            http1.when("POST", "/keys/upload").respond(200, (path, obj) => {
-                deviceKeys[(obj.device_keys as any).device_id] = obj.device_keys;
+            http1.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/upload",
+            }).reply(200, (opts) => {
+                const obj = JSON.parse(opts.body as string);
+                deviceKeys[obj.device_keys.device_id] = obj.device_keys;
                 return {
                     one_time_key_counts: {
                         // Enough to trick the OlmMachine into thinking it has enough keys
@@ -681,12 +684,13 @@ describe('CryptoClient', () => {
                     },
                 };
             });
-            http1.when("POST", "/keys/query").respond(200, (path, obj) => {
-                return {
-                    device_keys: {
-                        [userId]: deviceKeys,
-                    }
-                };
+            http1.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, {
+                device_keys: {
+                    [userId]: deviceKeys,
+                }
             });
             await Promise.all([
                 client1.crypto.prepare(),
@@ -694,11 +698,12 @@ describe('CryptoClient', () => {
             ]);
 
             // Recovery is not available yet.
-            http1.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(404, (path, obj) => {
-                return {
-                    errcode: "M_NOT_FOUND",
-                    error: "Not found"
-                };
+            http1.mock.intercept({
+                method: "GET",
+                path: new RegExp("^/_matrix/client/v3/user/%40alice%3Aexample.org/account_data/"),
+            }).reply(404, {
+                errcode: "M_NOT_FOUND",
+                error: "Not found"
             });
             expect((await Promise.all([
                 client1.crypto.isRecoveryAvailable(),
@@ -708,24 +713,29 @@ describe('CryptoClient', () => {
             // Create the cryptographic identity, and secret storage.
             let crossSigningKeys: Record<string, any>;
             const accountData: Record<string, any> = {};
-            http1.when("POST", "/keys/device_signing/upload").respond(200, (path, obj) => {
-                crossSigningKeys = obj;
+            http1.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/device_signing/upload",
+            }).reply(200, (opts) => {
+                crossSigningKeys = JSON.parse(opts.body as string);
                 return {};
             });
-            http1.when("POST", "/keys/signatures/upload").respond(200, (path, obj) => {
-                return {};
-            });
+            http1.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/signatures/upload",
+            }).reply(200, {});
             // `createIdentity` will set 5 items of account data: the default
             // secret storage key, the secret storage key info, and the three
             // cross-signing private keys.
-            for (let i = 0; i < 5; i++) {
-                http1.when("PUT", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
-                    const components = path.split("/");
-                    const name = components.at(-1);
-                    accountData[name] = obj;
-                    return {};
-                });
-            }
+            http1.mock.intercept({
+                method: "PUT",
+                path: new RegExp("^/_matrix/client/v3/user/%40alice%3Aexample.org/account_data/"),
+            }).reply(200, (opts) => {
+                const components = opts.path.split("/");
+                const name = components.at(-1);
+                accountData[name] = opts.body;
+                return {};
+            }).times(5);
             const [recoveryKey, ] = await Promise.all([
                 client1.crypto.createIdentity(),
                 http1.flushAllExpected(),
@@ -734,13 +744,14 @@ describe('CryptoClient', () => {
             // Recovery should be available now.
             // `isRecoveryAvailable` will read the 5 items of account data that
             // were set by `createIdentity`.
-            for (let i = 0; i < 5; i++) {
-                http1.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
-                    const components = path.split("/");
-                    const name = components.at(-1);
-                    return accountData[name];
-                });
-            }
+            http1.mock.intercept({
+                method: "GET",
+                path: new RegExp("^/_matrix/client/v3/user/%40alice%3Aexample.org/account_data/"),
+            }).reply(200, (opts) => {
+                const components = opts.path.split("/");
+                const name = components.at(-1);
+                return accountData[name];
+            }).times(5);
             expect((await Promise.all([
                 client1.crypto.isRecoveryAvailable(),
                 http1.flushAllExpected(),
@@ -751,7 +762,11 @@ describe('CryptoClient', () => {
 
             // Initialize the crypto client.
             client2.getWhoAmI = () => Promise.resolve({ user_id: userId, device_id: TEST_DEVICE_ID+"2" });
-            http2.when("POST", "/keys/upload").respond(200, (path, obj) => {
+            http2.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/upload",
+            }).reply(200, (opts) => {
+                const obj = JSON.parse(opts.body as string);
                 deviceKeys[(obj.device_keys as any).device_id] = obj.device_keys;
                 return {
                     one_time_key_counts: {
@@ -760,22 +775,23 @@ describe('CryptoClient', () => {
                     },
                 };
             });
-            http2.when("POST", "/keys/query").respond(200, (path, obj) => {
+            http2.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, {
                 // We need to send the cross-signing keys in addition to the device keys.
-                return {
-                    device_keys: {
-                        [userId]: deviceKeys,
-                    },
-                    master_keys: {
-                        [userId]: crossSigningKeys.master_key,
-                    },
-                    user_signing_keys: {
-                        [userId]: crossSigningKeys.user_signing_key,
-                    },
-                    self_signing_keys: {
-                        [userId]: crossSigningKeys.self_signing_key,
-                    },
-                };
+                device_keys: {
+                    [userId]: deviceKeys,
+                },
+                master_keys: {
+                    [userId]: crossSigningKeys.master_key,
+                },
+                user_signing_keys: {
+                    [userId]: crossSigningKeys.user_signing_key,
+                },
+                self_signing_keys: {
+                    [userId]: crossSigningKeys.self_signing_key,
+                },
             });
             await Promise.all([
                 client2.crypto.prepare(),
@@ -785,19 +801,22 @@ describe('CryptoClient', () => {
             // The client cross-signs using the recovery key.
             // `confirmIdentityWithRecoveryKey` will read the 5 items of account
             // data that were set by `createIdentity`.
-            for (let i = 0; i < 5; i++) {
-                http2.when("GET", "/user/%40alice%3Aexample.org/account_data/").respond(200, (path, obj) => {
-                    const components = path.split("/");
-                    const name = components.at(-1);
-                    return accountData[name];
-                });
-            }
-            http2.when("POST", "/keys/query").respond(200, (path, obj) => {
-                return {};
-            });
-            http2.when("POST", "/keys/signatures/upload").respond(200, (path, obj) => {
-                return {};
-            });
+            http2.mock.intercept({
+                method: "GET",
+                path: new RegExp("^/_matrix/client/v3/user/%40alice%3Aexample.org/account_data/"),
+            }).reply(200, (opts) => {
+                const components = opts.path.split("/");
+                const name = components.at(-1);
+                return accountData[name];
+            }).times(5);
+            http2.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/query",
+            }).reply(200, {});
+            http2.mock.intercept({
+                method: "POST",
+                path: "/_matrix/client/v3/keys/signatures/upload",
+            }).reply(200, {});
             await Promise.all([
                 client2.crypto.confirmIdentityWithRecoveryKey(recoveryKey),
                 http2.flushAllExpected(),

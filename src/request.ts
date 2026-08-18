@@ -1,4 +1,4 @@
-import * as origRequestFn from "request";
+import { request as origRequestFn } from "undici";
 
 let requestFn = origRequestFn;
 

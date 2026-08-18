@@ -1,6 +1,5 @@
 import { IStorageProvider, MatrixClient, MSC2716BatchSendResponse, UnstableAppserviceApis } from "../../src";
-import HttpBackend from '../MatrixMockRequest';
-import { createTestClient } from "../TestUtils";
+import { createTestClient, HttpBackend } from "../TestUtils";
 
 export function createTestUnstableClient(
     storage: IStorageProvider = null,
@@ -36,13 +35,15 @@ describe('UnstableAppserviceApis', () => {
                 next_chunk_id: "evenchunkierid",
             } as MSC2716BatchSendResponse;
 
-            http.when("POST", `/_matrix/client/unstable/org.matrix.msc2716/rooms/`).respond(200, (path, content, req) => {
-                expect(path).toEqual(`${hsUrl}/_matrix/client/unstable/org.matrix.msc2716/rooms/${encodeURIComponent(roomId)}/batch_send`);
-                expect(req.queryParams).toMatchObject({
+            http.mock.intercept({
+                method: "POST",
+                path: `/_matrix/client/unstable/org.matrix.msc2716/rooms/${encodeURIComponent(roomId)}/batch_send`,
+                query: {
                     prev_event: prevEventId,
                     chunk_id: prevChunkId,
-                });
-                expect(content).toMatchObject({
+                },
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject({
                     events: events,
                     state_events_at_start: stateEvents,
                 });
@@ -71,11 +72,11 @@ describe('UnstableAppserviceApis', () => {
             };
             const ts = 5000;
 
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
-                expect(req.queryParams).toMatchObject({ ts });
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/[^/]+?ts=${ts}$`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 
@@ -99,11 +100,11 @@ describe('UnstableAppserviceApis', () => {
             };
             const ts = 5000;
 
-            http.when("PUT", "/_matrix/client/v3/rooms").respond(200, (path, content, req) => {
-                const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/`);
-                expect(idx).toBe(0);
-                expect(content).toMatchObject(eventContent);
-                expect(req.queryParams).toMatchObject({ ts });
+            http.mock.intercept({
+                method: "PUT",
+                path: new RegExp(`^/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/[^/]+?ts=${ts}$`),
+            }).reply(200, (opts) => {
+                expect(JSON.parse(opts.body as string)).toMatchObject(eventContent);
                 return { event_id: eventId };
             });
 

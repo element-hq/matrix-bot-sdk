@@ -50,7 +50,7 @@ export class MatrixContentScannerClient {
         const res = await this.client.doRequest("GET", path, null, null, null, true, null, true, { errorHandler });
         return {
             data: res.body,
-            contentType: res.headers["content-type"],
+            contentType: res.headers["content-type"] as string,
         };
     }
 
@@ -61,6 +61,6 @@ export class MatrixContentScannerClient {
         const res = await this.client.doRequest("POST", path, undefined, {
             file,
         }, null, true, null, true, { errorHandler });
-        return res.data;
+        return res.body;
     }
 }

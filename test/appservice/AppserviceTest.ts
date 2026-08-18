@@ -1,9 +1,12 @@
 import * as getPort from "get-port";
-import * as requestPromise from "request-promise";
 import * as simple from "simple-mock";
+import { request } from "undici";
 
-import { Appservice, EventKind, Intent, IPreprocessor, setRequestFn } from "../../src";
-import HttpBackend from '../MatrixMockRequest';
+import { Appservice, EventKind, Intent, IPreprocessor } from "../../src";
+import { HttpBackend } from "../TestUtils";
+
+type RequestOpts = Parameters<typeof request>[1];
+type JsonRequestOpts = RequestOpts & { json: any };
 
 async function beginAppserviceWithProtocols(protocols: string[]) {
     const port = await getPort();
@@ -30,12 +33,11 @@ async function beginAppserviceWithProtocols(protocols: string[]) {
         return Promise.resolve();
     };
 
-    async function doCall(route: string, opts: any = {}, qs: any = {}) {
-        return await requestPromise({
-            uri: `http://localhost:${port}${route}`,
+    async function doCall(route: string, opts: RequestOpts = {}, qs: RequestOpts["query"] = {}) {
+        opts.headers = { ...opts.headers, ["Content-Type"]: "application/json" };
+        return await request(`http://localhost:${port}${route}`, {
             method: "GET",
-            qs: { access_token: hsToken, ...qs },
-            json: true,
+            query: { access_token: hsToken, ...qs },
             ...opts,
         });
     }
@@ -765,23 +767,20 @@ describe('Appservice', () => {
 
         try {
             // Should not be 200 OK
-            await requestPromise({
-                uri: `http://localhost:${port}/this/is/not/a/valid/api`,
+            const res = await request(`http://localhost:${port}/this/is/not/a/valid/api`, {
                 method: "PUT",
-                json: { events: [] },
+                body: JSON.stringify({ events: [] }),
                 headers: {
                     Authorization: `Bearer ${hsToken}`,
+                    "Content-Type": "application/json",
                 },
             });
 
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request passed when it shouldn't have");
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            expect(await res.body.json()).toMatchObject({
                 errcode: "M_UNRECOGNIZED",
                 error: "Endpoint not implemented",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -815,28 +814,22 @@ describe('Appservice', () => {
 
         try {
             async function verifyAuth(method: string, route: string) {
-                async function doCall(opts: any = {}) {
-                    try {
-                        await requestPromise({
-                            uri: `http://localhost:${port}${route}`,
-                            method: method,
-                            json: true,
-                            ...opts,
-                        });
+                async function doCall(opts: RequestOpts = {}) {
+                    opts.headers = { ...opts.headers, ["Content-Type"]: "application/json" };
+                    const res = await request(`http://localhost:${port}${route}`, {
+                        method: method,
+                        ...opts,
+                    });
 
-                        // noinspection ExceptionCaughtLocallyJS
-                        throw new Error("Authentication passed when it shouldn't have");
-                    } catch (e) {
-                        expect(e.error).toMatchObject({
-                            errcode: "AUTH_FAILED",
-                            error: "Authentication failed",
-                        });
-                        expect(e.statusCode).toBe(401);
-                    }
+                    expect(await res.body.json()).toMatchObject({
+                        errcode: "AUTH_FAILED",
+                        error: "Authentication failed",
+                    });
+                    expect(res.statusCode).toBe(401);
                 }
 
                 await doCall();
-                await doCall({ qs: { access_token: "WRONG_TOKEN" } });
+                await doCall({ query: { access_token: "WRONG_TOKEN" } });
                 await doCall({ headers: { Authorization: "Bearer WRONG_TOKEN" } });
                 await doCall({ headers: { Authorization: "NotBearer WRONG_TOKEN" } });
             }
@@ -886,36 +879,30 @@ describe('Appservice', () => {
         await appservice.begin();
 
         try {
-            // Should return 200 OK
-            await requestPromise({
-                uri: `http://localhost:${port}/_matrix/app/v1/transactions/1`,
+            let res = await request(`http://localhost:${port}/_matrix/app/v1/transactions/1`, {
                 method: "PUT",
-                json: { events: [] },
+                body: JSON.stringify({ events: [] }),
                 headers: {
                     Authorization: `Bearer ${hsToken}`,
+                    "Content-Type": "application/json",
+                },
+            });
+            expect(res.statusCode).toBe(200);
+
+            res = await request(`http://localhost:${port}/_matrix/app/v1/transactions/1`, {
+                method: "PUT",
+                body: JSON.stringify({ events: [] }),
+                headers: {
+                    Authorization: `IMPROPER_AUTH ${hsToken}`,
+                    "Content-Type": "application/json",
                 },
             });
 
-            try {
-                // Should not be 200 OK
-                await requestPromise({
-                    uri: `http://localhost:${port}/_matrix/app/v1/transactions/1`,
-                    method: "PUT",
-                    json: { events: [] },
-                    headers: {
-                        Authorization: `IMPROPER_AUTH ${hsToken}`,
-                    },
-                });
-
-                // noinspection ExceptionCaughtLocallyJS
-                throw new Error("Authentication passed when it shouldn't have");
-            } catch (e) {
-                expect(e.error).toMatchObject({
-                    errcode: "AUTH_FAILED",
-                    error: "Authentication failed",
-                });
-                expect(e.statusCode).toBe(401);
-            }
+            expect(await res.body.json()).toMatchObject({
+                errcode: "AUTH_FAILED",
+                error: "Authentication failed",
+            });
+            expect(res.statusCode).toBe(401);
         } finally {
             appservice.stop();
         }
@@ -948,21 +935,16 @@ describe('Appservice', () => {
         await appservice.begin();
 
         try {
-            async function doCall(route: string, opts: any = {}, err: any) {
-                try {
-                    await requestPromise({
-                        uri: `http://localhost:${port}${route}`,
-                        method: "PUT",
-                        qs: { access_token: hsToken },
-                        ...opts,
-                    });
+            async function doCall(route: string, opts: { json: any }, err: any) {
+                const res = await request(`http://localhost:${port}${route}`, {
+                    method: "PUT",
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
+                });
 
-                    // noinspection ExceptionCaughtLocallyJS
-                    throw new Error("Request passed when it shouldn't have");
-                } catch (e) {
-                    expect(e.error).toMatchObject(err);
-                    expect(e.statusCode).toBe(400);
-                }
+                expect(await res.body.json()).toMatchObject(err);
+                expect(res.statusCode).toBe(400);
             }
 
             await doCall("/transactions/1", { json: { hello: "world" } }, {
@@ -1024,14 +1006,14 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 expect(messageSpy.callCount).toBe(1);
@@ -1091,14 +1073,14 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 eventSpy.callCount = 0;
@@ -1168,13 +1150,13 @@ describe('Appservice', () => {
 
             let txnId = 1;
             async function doCall(route: string, spyCallback: () => void) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}${txnId++}`,
+                const res = await request(`http://localhost:${port}${route}${txnId++}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    json: txnBody,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(txnBody),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
                 spyCallback();
 
                 deviceListSpy.callCount = 0;
@@ -1366,14 +1348,14 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 expect(messageSpy.callCount).toBe(1);
@@ -1442,14 +1424,14 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 expect(messageSpy.callCount).toBe(1);
@@ -1518,14 +1500,14 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 expect(processorSpy.callCount).toBe(2);
@@ -1615,14 +1597,14 @@ describe('Appservice', () => {
             appservice.on("room.event", eventSpy);
             appservice.on("room.message", messageSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(3);
                 expect(messageSpy.callCount).toBe(1);
@@ -1704,14 +1686,15 @@ describe('Appservice', () => {
             });
             appservice.on("ephemeral.event", eventSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                     ...opts,
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(eventSpy.callCount).toBe(2);
                 expect(processorSpyA.callCount).toBe(1);
@@ -1833,14 +1816,14 @@ describe('Appservice', () => {
             appservice.on("room.leave", leaveSpy);
             appservice.on("room.invite", inviteSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(joinSpy.callCount).toBe(1);
                 expect(leaveSpy.callCount).toBe(2);
@@ -1930,14 +1913,14 @@ describe('Appservice', () => {
                 ],
             };
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(refreshSpy.callCount).toBe(0);
             }
@@ -2015,14 +1998,14 @@ describe('Appservice', () => {
             appservice.on("room.upgraded", upgradeSpy);
             appservice.on("room.event", eventSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string, opts: { json: any }) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "PUT",
-                    qs: { access_token: hsToken },
-                    ...opts,
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(opts.json),
+                    headers: { "Content-Type": "application/json" },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(archiveSpy.callCount).toBe(1);
                 expect(upgradeSpy.callCount).toBe(1);
@@ -2068,11 +2051,10 @@ describe('Appservice', () => {
         await appservice.begin();
 
         try {
-            const res = await requestPromise({
-                uri: `http://localhost:${port}/test`,
+            const res = await request(`http://localhost:${port}/test`, {
                 method: "GET",
             });
-            expect(res).toEqual("OK");
+            expect(res.statusText).toEqual("OK");
         } finally {
             appservice.stop();
         }
@@ -2157,13 +2139,13 @@ describe('Appservice', () => {
             });
             appservice.on("query.key_claim", claimSpy);
 
-            const res = await requestPromise({
-                uri: `http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3983/keys/claim`,
+            const res = await request(`http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3983/keys/claim`, {
                 method: "POST",
-                qs: { access_token: hsToken },
-                json: query,
+                query: { access_token: hsToken },
+                body: JSON.stringify(query),
+                headers: { "Content-Type": "application/json" },
             });
-            expect(res).toStrictEqual(response);
+            expect(await res.body.json()).toStrictEqual(response);
             expect(claimSpy.callCount).toBe(1);
         } finally {
             appservice.stop();
@@ -2205,13 +2187,13 @@ describe('Appservice', () => {
 
             // Note how we're not registering anything with the EventEmitter
 
-            const res = await requestPromise({
-                uri: `http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3983/keys/claim`,
+            const res = await request(`http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3983/keys/claim`, {
                 method: "POST",
-                qs: { access_token: hsToken },
-                json: query,
+                query: { access_token: hsToken },
+                body: JSON.stringify(query),
             }).catch(e => ({ body: e.response.body, statusCode: e.statusCode }));
-            expect(res).toStrictEqual({ statusCode: 404, body: { errcode: "M_UNRECOGNIZED", error: "Endpoint not implemented" } });
+            expect(await res.body.json()).toStrictEqual({ errcode: "M_UNRECOGNIZED", error: "Endpoint not implemented" });
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -2267,13 +2249,13 @@ describe('Appservice', () => {
             });
             appservice.on("query.key", querySpy);
 
-            const res = await requestPromise({
-                uri: `http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3984/keys/query`,
+            const res = await request(`http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3984/keys/query`, {
                 method: "POST",
-                qs: { access_token: hsToken },
-                json: query,
+                query: { access_token: hsToken },
+                body: JSON.stringify(query),
+                headers: { "Content-Type": "application/json" },
             });
-            expect(res).toStrictEqual(response);
+            expect(await res.body.json()).toStrictEqual(response);
             expect(querySpy.callCount).toBe(1);
         } finally {
             appservice.stop();
@@ -2314,13 +2296,14 @@ describe('Appservice', () => {
 
             // Note how we're not registering anything with the EventEmitter
 
-            const res = await requestPromise({
-                uri: `http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3984/keys/query`,
+            const res = await request(`http://localhost:${port}/_matrix/app/unstable/org.matrix.msc3984/keys/query`, {
                 method: "POST",
-                qs: { access_token: hsToken },
-                json: query,
-            }).catch(e => ({ body: e.response.body, statusCode: e.statusCode }));
-            expect(res).toStrictEqual({ statusCode: 404, body: { errcode: "M_UNRECOGNIZED", error: "Endpoint not implemented" } });
+                query: { access_token: hsToken },
+                body: JSON.stringify(query),
+                headers: { "Content-Type": "application/json" },
+            });
+            expect(await res.body.json()).toStrictEqual({ errcode: "M_UNRECOGNIZED", error: "Endpoint not implemented" });
+            expect(res.statusCode === 404);
         } finally {
             appservice.stop();
         }
@@ -2374,15 +2357,12 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 });
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(nameSpy.callCount).toBe(0);
                 expect(avatarSpy.callCount).toBe(0);
@@ -2424,8 +2404,8 @@ describe('Appservice', () => {
             return null;
         };
 
-        const http = new HttpBackend();
-        setRequestFn(http.requestFn);
+        const http = new HttpBackend(hsUrl);
+        http.mockAgent.enableNetConnect();
 
         await appservice.begin();
 
@@ -2451,24 +2431,27 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                    expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`);
-                    expect(content).toMatchObject({ displayname: displayName });
+            async function doCall(route: string) {
+                http.mock.intercept({
+                    method: "PUT",
+                    path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+                    query: { user_id: userId },
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ displayname: displayName });
                     return {};
                 });
-                http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                    expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`);
-                    expect(content).toMatchObject({ avatar_url: avatarUrl });
+                http.mock.intercept({
+                    method: "PUT",
+                    path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+                    query: { user_id: userId },
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ avatar_url: avatarUrl });
                     return {};
                 });
 
-                const [res] = await Promise.all([requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+                const [res] = await Promise.all([request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 }), http.flushAllExpected()]);
                 expect(res).toMatchObject({});
 
@@ -2508,8 +2491,8 @@ describe('Appservice', () => {
             return null;
         };
 
-        const http = new HttpBackend();
-        setRequestFn(http.requestFn);
+        const http = new HttpBackend(hsUrl);
+        http.mockAgent.enableNetConnect();
 
         await appservice.begin();
 
@@ -2535,26 +2518,29 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                    expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`);
-                    expect(content).toMatchObject({ displayname: displayName });
+            async function doCall(route: string) {
+                http.mock.intercept({
+                    method: "PUT",
+                    path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+                    query: { user_id: userId },
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ displayname: displayName });
                     return {};
                 });
-                http.when("PUT", "/_matrix/client/v3/profile").respond(200, (path, content) => {
-                    expect(path).toEqual(`${hsUrl}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`);
-                    expect(content).toMatchObject({ avatar_url: avatarUrl });
+                http.mock.intercept({
+                    method: "PUT",
+                    path: `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+                    query: { user_id: userId },
+                }).reply(200, (opts) => {
+                    expect(JSON.parse(opts.body as string)).toMatchObject({ avatar_url: avatarUrl });
                     return {};
                 });
 
-                const [res] = await Promise.all([requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+                const [res] = await Promise.all([request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 }), http.flushAllExpected()]);
-                expect(res).toMatchObject({});
+                expect(await res.body.json()).toMatchObject({});
 
                 expect(userSpy.callCount).toBe(1);
                 userSpy.callCount = 0;
@@ -2615,25 +2601,17 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                try {
-                    await requestPromise({
-                        uri: `http://localhost:${port}${route}`,
-                        method: "GET",
-                        qs: { access_token: hsToken },
-                        json: true,
-                        ...opts,
-                    });
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
+                    method: "GET",
+                    query: { access_token: hsToken },
+                });
 
-                    // noinspection ExceptionCaughtLocallyJS
-                    throw new Error("Request finished when it should not have");
-                } catch (e) {
-                    expect(e.error).toMatchObject({
-                        errcode: "USER_DOES_NOT_EXIST",
-                        error: "User not created",
-                    });
-                    expect(e.statusCode).toBe(404);
-                }
+                expect(await res.body.json()).toMatchObject({
+                    errcode: "USER_DOES_NOT_EXIST",
+                    error: "User not created",
+                });
+                expect(res.statusCode).toBe(404);
 
                 expect(nameSpy.callCount).toBe(0);
                 expect(avatarSpy.callCount).toBe(0);
@@ -2698,25 +2676,18 @@ describe('Appservice', () => {
 
             appservice.on("query.user", userSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                try {
-                    await requestPromise({
-                        uri: `http://localhost:${port}${route}`,
-                        method: "GET",
-                        qs: { access_token: hsToken },
-                        json: true,
-                        ...opts,
-                    });
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
+                    method: "GET",
+                    query: { access_token: hsToken },
+                    body: JSON.stringify(true),
+                });
 
-                    // noinspection ExceptionCaughtLocallyJS
-                    throw new Error("Request finished when it should not have");
-                } catch (e) {
-                    expect(e.error).toMatchObject({
-                        errcode: "USER_DOES_NOT_EXIST",
-                        error: "User not created",
-                    });
-                    expect(e.statusCode).toBe(404);
-                }
+                expect(await res.body.json()).toMatchObject({
+                    errcode: "USER_DOES_NOT_EXIST",
+                    error: "User not created",
+                });
+                expect(res.statusCode).toBe(404);
 
                 expect(nameSpy.callCount).toBe(0);
                 expect(avatarSpy.callCount).toBe(0);
@@ -2781,15 +2752,12 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 });
-                expect(res).toMatchObject(expected);
+                expect(await res.body.json()).toMatchObject(expected);
 
                 expect(createRoomSpy.callCount).toBe(1);
                 expect(roomSpy.callCount).toBe(1);
@@ -2852,15 +2820,12 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 });
-                expect(res).toMatchObject(expected);
+                expect(await res.body.json()).toMatchObject(expected);
 
                 expect(createRoomSpy.callCount).toBe(1);
                 expect(roomSpy.callCount).toBe(1);
@@ -2923,15 +2888,12 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                const res = await requestPromise({
-                    uri: `http://localhost:${port}${route}`,
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
                     method: "GET",
-                    qs: { access_token: hsToken },
-                    json: true,
-                    ...opts,
+                    query: { access_token: hsToken },
                 });
-                expect(res).toMatchObject(expected);
+                expect(await res.body.json()).toMatchObject(expected);
 
                 expect(createRoomSpy.callCount).toBe(1);
                 expect(roomSpy.callCount).toBe(1);
@@ -2989,25 +2951,17 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                try {
-                    await requestPromise({
-                        uri: `http://localhost:${port}${route}`,
-                        method: "GET",
-                        qs: { access_token: hsToken },
-                        json: true,
-                        ...opts,
-                    });
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
+                    method: "GET",
+                    query: { access_token: hsToken },
+                });
 
-                    // noinspection ExceptionCaughtLocallyJS
-                    throw new Error("Request finished when it should not have");
-                } catch (e) {
-                    expect(e.error).toMatchObject({
-                        errcode: "ROOM_DOES_NOT_EXIST",
-                        error: "Room not created",
-                    });
-                    expect(e.statusCode).toBe(404);
-                }
+                expect(await res.body.json()).toMatchObject({
+                    errcode: "ROOM_DOES_NOT_EXIST",
+                    error: "Room not created",
+                });
+                expect(res.statusCode).toBe(404);
 
                 expect(createRoomSpy.callCount).toBe(0);
                 expect(roomSpy.callCount).toBe(1);
@@ -3065,25 +3019,17 @@ describe('Appservice', () => {
 
             appservice.on("query.room", roomSpy);
 
-            async function doCall(route: string, opts: any = {}) {
-                try {
-                    await requestPromise({
-                        uri: `http://localhost:${port}${route}`,
-                        method: "GET",
-                        qs: { access_token: hsToken },
-                        json: true,
-                        ...opts,
-                    });
+            async function doCall(route: string) {
+                const res = await request(`http://localhost:${port}${route}`, {
+                    method: "GET",
+                    query: { access_token: hsToken },
+                });
 
-                    // noinspection ExceptionCaughtLocallyJS
-                    throw new Error("Request finished when it should not have");
-                } catch (e) {
-                    expect(e.error).toMatchObject({
-                        errcode: "ROOM_DOES_NOT_EXIST",
-                        error: "Room not created",
-                    });
-                    expect(e.statusCode).toBe(404);
-                }
+                expect(await res.body.json()).toMatchObject({
+                    errcode: "ROOM_DOES_NOT_EXIST",
+                    error: "Room not created",
+                });
+                expect(res.statusCode).toBe(404);
 
                 expect(createRoomSpy.callCount).toBe(0);
                 expect(roomSpy.callCount).toBe(1);
@@ -3109,9 +3055,9 @@ describe('Appservice', () => {
         try {
             appservice.on("thirdparty.protocol", getProtoSpy);
             const result = await doCall("/_matrix/app/v1/thirdparty/protocol/" + protos[0]);
-            expect(result).toEqual(responseObj);
+            expect(await result.body.json()).toEqual(responseObj);
             const result2 = await doCall("/_matrix/app/v1/thirdparty/protocol/" + protos[1]);
-            expect(result2).toEqual(responseObj);
+            expect(await result2.body.json()).toEqual(responseObj);
         } finally {
             appservice.stop();
         }
@@ -3125,12 +3071,9 @@ describe('Appservice', () => {
         };
         const expectedStatus = 404;
         try {
-            await doCall("/_matrix/app/v1/thirdparty/protocol/notaproto");
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request finished when it should not have");
-        } catch (e) {
-            expect(e.error).toMatchObject(expectedError);
-            expect(e.statusCode).toBe(expectedStatus);
+            const res = await doCall("/_matrix/app/v1/thirdparty/protocol/notaproto");
+            expect(await res.body.json()).toMatchObject(expectedError);
+            expect(res.statusCode).toBe(expectedStatus);
         } finally {
             appservice.stop();
         }
@@ -3152,7 +3095,7 @@ describe('Appservice', () => {
         appservice.on("thirdparty.user.remote", getUserSpy);
         try {
             const result = await doCall("/_matrix/app/v1/thirdparty/user/" + protocolId, {}, userFields);
-            expect(result).toEqual(responseObj);
+            expect(await result.body.json()).toEqual(responseObj);
         } finally {
             appservice.stop();
         }
@@ -3169,7 +3112,7 @@ describe('Appservice', () => {
         appservice.on("thirdparty.user.matrix", getUserSpy);
         try {
             const result = await doCall("/_matrix/app/v1/thirdparty/user", {}, { userid: expectedUserId });
-            expect(result).toEqual(responseObj);
+            expect(await result.body.json()).toEqual(responseObj);
         } finally {
             appservice.stop();
         }
@@ -3178,15 +3121,12 @@ describe('Appservice', () => {
     it("should fail to lookup a remote user if the protocol is wrong", async () => {
         const { appservice, doCall } = await beginAppserviceWithProtocols(["fakeproto"]);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/user/pr0tocol");
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request finished when it should not have");
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/user/pr0tocol");
+            expect(await res.body.json()).toMatchObject({
                 errcode: "PROTOCOL_NOT_HANDLED",
                 error: "Protocol is not handled by this appservice",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3201,13 +3141,12 @@ describe('Appservice', () => {
         });
         appservice.on("thirdparty.user.matrix", getUserSpy);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/user", {}, { userid: expectedUserId });
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/user", {}, { userid: expectedUserId });
+            expect(await res.body.json()).toMatchObject({
                 errcode: "NO_MAPPING_FOUND",
                 error: "No mappings found",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3227,13 +3166,12 @@ describe('Appservice', () => {
         });
         appservice.on("thirdparty.user.remote", getUserSpy);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/user/" + protocolId, {}, userFields);
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/user/" + protocolId, {}, userFields);
+            expect(await res.body.json()).toMatchObject({
                 errcode: "NO_MAPPING_FOUND",
                 error: "No mappings found",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3242,15 +3180,12 @@ describe('Appservice', () => {
     it("should fail to lookup a remote user if the mxid is empty", async () => {
         const { appservice, doCall } = await beginAppserviceWithProtocols(["fakeproto"]);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/user");
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request finished when it should not have");
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/user");
+            expect(await res.body.json()).toMatchObject({
                 errcode: "INVALID_PARAMETERS",
                 error: "Invalid parameters given",
             });
-            expect(e.statusCode).toBe(400);
+            expect(res.statusCode).toBe(400);
         } finally {
             appservice.stop();
         }
@@ -3272,7 +3207,7 @@ describe('Appservice', () => {
         appservice.on("thirdparty.location.remote", getLocationSpy);
         try {
             const result = await doCall("/_matrix/app/v1/thirdparty/location/" + protocolId, {}, locationFields);
-            expect(result).toEqual(responseObj);
+            expect(await result.body.json()).toEqual(responseObj);
         } finally {
             appservice.stop();
         }
@@ -3289,7 +3224,7 @@ describe('Appservice', () => {
         appservice.on("thirdparty.location.matrix", getLocationSpy);
         try {
             const result = await doCall("/_matrix/app/v1/thirdparty/location", {}, { alias: expectedAlias });
-            expect(result).toEqual(responseObj);
+            expect(await result.body.json()).toEqual(responseObj);
         } finally {
             appservice.stop();
         }
@@ -3298,15 +3233,12 @@ describe('Appservice', () => {
     it("should fail to lookup a remote location if the protocol is wrong", async () => {
         const { appservice, doCall } = await beginAppserviceWithProtocols(["fakeproto"]);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/location/pr0tocol");
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request finished when it should not have");
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/location/pr0tocol");
+            expect(await res.body.json()).toMatchObject({
                 errcode: "PROTOCOL_NOT_HANDLED",
                 error: "Protocol is not handled by this appservice",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3321,13 +3253,12 @@ describe('Appservice', () => {
         });
         appservice.on("thirdparty.location.matrix", getUserSpy);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/location", {}, { alias: expectedAlias });
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/location", {}, { alias: expectedAlias });
+            expect(await res.body.json()).toMatchObject({
                 errcode: "NO_MAPPING_FOUND",
                 error: "No mappings found",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3347,13 +3278,12 @@ describe('Appservice', () => {
         });
         appservice.on("thirdparty.location.remote", getLocationSpy);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/location/" + protocolId, {}, locationFields);
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/location/" + protocolId, {}, locationFields);
+            expect(await res.body.json()).toMatchObject({
                 errcode: "NO_MAPPING_FOUND",
                 error: "No mappings found",
             });
-            expect(e.statusCode).toBe(404);
+            expect(res.statusCode).toBe(404);
         } finally {
             appservice.stop();
         }
@@ -3362,15 +3292,12 @@ describe('Appservice', () => {
     it("should fail to lookup a matrix location if the alias is empty", async () => {
         const { appservice, doCall } = await beginAppserviceWithProtocols(["fakeproto"]);
         try {
-            await doCall("/_matrix/app/v1/thirdparty/location");
-            // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Request finished when it should not have");
-        } catch (e) {
-            expect(e.error).toMatchObject({
+            const res = await doCall("/_matrix/app/v1/thirdparty/location");
+            expect(await res.body.json()).toMatchObject({
                 errcode: "INVALID_PARAMETERS",
                 error: "Invalid parameters given",
             });
-            expect(e.statusCode).toBe(400);
+            expect(res.statusCode).toBe(400);
         } finally {
             appservice.stop();
         }
@@ -3403,12 +3330,13 @@ describe('Appservice', () => {
             return null;
         };
 
-        const http = new HttpBackend();
-        setRequestFn(http.requestFn);
+        const http = new HttpBackend(hsUrl);
 
-        http.when("PUT", "/_matrix/client/v3/directory/list/appservice").respond(200, (path, content) => {
-            expect(path).toEqual(`${hsUrl}/_matrix/client/v3/directory/list/appservice/${encodeURIComponent(networkId)}/${encodeURIComponent(roomId)}`);
-            expect(content).toMatchObject({ visibility: "public" });
+        http.mock.intercept({
+            method: "PUT",
+            path: `/_matrix/client/v3/directory/list/appservice/${encodeURIComponent(networkId)}/${encodeURIComponent(roomId)}`,
+        }).reply(200, (opts) => {
+            expect(JSON.parse(opts.body as string)).toMatchObject({ visibility: "public" });
             return {};
         });
 
@@ -3445,12 +3373,15 @@ describe('Appservice', () => {
             return null;
         };
 
-        const http = new HttpBackend();
-        setRequestFn(http.requestFn);
+        const http = new HttpBackend(hsUrl);
 
         // AS -> HS
         let txnId;
-        http.when("POST", `/_matrix/client/v1/appservice/${asId}/ping`).respond(200, (_path, content) => {
+        http.mock.intercept({
+            method: "POST",
+            path: `/_matrix/client/v1/appservice/${asId}/ping`,
+        }).reply(200, (opts) => {
+            const content = JSON.parse(opts.body as string);
             expect(content.transaction_id).toBeDefined();
             txnId = content.transaction_id;
             // Note. We can't do an async thing here so instead we return immediately.
