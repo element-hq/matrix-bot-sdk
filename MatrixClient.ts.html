@@ -117,6 +117,7 @@
 import { htmlToText } from "html-to-text";
 import { LRUCache } from "lru-cache";
 
+import type { ParsedUrlQueryInput } from "querystring";
 import { IStorageProvider } from "./storage/IStorageProvider";
 import { MemoryStorageProvider } from "./storage/MemoryStorageProvider";
 import { IJoinRoomStrategy } from "./strategies/JoinRoomStrategy";
@@ -135,7 +136,7 @@ import { EventContext } from "./models/EventContext";
 import { EventKind } from "./models/events/EventKind";
 import { IdentityClient } from "./identity/IdentityClient";
 import { OpenIDConnectToken } from "./models/OpenIDConnect";
-import { doHttpRequest, DoHttpRequestOpts } from "./http";
+import { doHttpRequest, DoHttpRequestOpts, RawResponse, ResponseBody } from "./http";
 import { Space, SpaceCreateOptions } from "./models/Spaces";
 import { CryptoClient } from "./e2ee/CryptoClient";
 import {
@@ -1850,7 +1851,7 @@ export class MatrixClient extends EventEmitter {
         const res = await this.doRequest("GET", path, { allow_remote: allowRemote }, null, null, true, null, true);
         return {
             data: res.body,
-            contentType: res.headers["content-type"],
+            contentType: res.headers["content-type"] as string,
         };
     }
 
@@ -1861,31 +1862,20 @@ export class MatrixClient extends EventEmitter {
      * @returns {Promise&lt;string>} Resolves to the MXC URI of the content
      */
     @timedMatrixClientFunctionCall()
-    public uploadContentFromUrl(url: string): Promise&lt;string> {
-        return new Promise&lt;{ body: Buffer, contentType: string }>((resolve, reject) => {
-            const requestId = ++this.requestId;
-            const params = {
-                uri: url,
-                method: "GET",
-                encoding: null,
-            };
-            getRequestFn()(params, (err, response, resBody) => {
-                if (err) {
-                    LogService.error("MatrixClientLite", "(REQ-" + requestId + ")", extractRequestError(err));
-                    reject(err);
-                } else {
-                    const contentType = response.headers['content-type'] || "application/octet-stream";
-
-                    LogService.trace("MatrixClientLite", "(REQ-" + requestId + " RESP-H" + response.statusCode + ")", "&lt;data>");
-                    if (response.statusCode &lt; 200 || response.statusCode >= 300) {
-                        LogService.error("MatrixClientLite", "(REQ-" + requestId + ")", "&lt;data>");
-                        reject(response);
-                    } else resolve({ body: resBody, contentType: contentType });
-                }
-            });
-        }).then(obj => {
-            return this.uploadContent(obj.body, obj.contentType);
+    public async uploadContentFromUrl(url: string): Promise&lt;string> {
+        const requestId = ++this.requestId;
+        const response = await getRequestFn()(url, { method: "GET" }).catch((err) => {
+            LogService.error("MatrixClientLite", "(REQ-" + requestId + ")", extractRequestError(err));
+            throw err;
         });
+        const contentType = response.headers['content-type'] as string || "application/octet-stream";
+
+        LogService.trace("MatrixClientLite", "(REQ-" + requestId + " RESP-H" + response.statusCode + ")", "&lt;data>");
+        if (response.statusCode &lt; 200 || response.statusCode >= 300) {
+            LogService.error("MatrixClientLite", "(REQ-" + requestId + ")", "&lt;data>");
+            throw response;
+        }
+        return await this.uploadContent(Buffer.from(await response.body.bytes()), contentType);
     }
 
     /**
@@ -2305,19 +2295,28 @@ export class MatrixClient extends EventEmitter {
     /**
      * Performs a web request to the homeserver, applying appropriate authorization headers for
      * this client.
-     * @param {"GET"|"POST"|"PUT"|"DELETE"} method The HTTP method to use in the request
-     * @param {string} endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
-     * @param {any} qs The query string to send. Optional.
-     * @param {any} body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
-     * @param {number} timeout The number of milliseconds to wait before timing out.
-     * @param {boolean} raw If true, the raw response will be returned instead of the response body.
-     * @param {string} contentType The content type to send. Only used if the `body` is a Buffer.
-     * @param {string} noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
-     * @returns {Promise&lt;any>} Resolves to the response (body), rejected if a non-2xx status code was returned.
+     * @param method The HTTP method to use in the request
+     * @param endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
+     * @param qs The query string to send. Optional.
+     * @param body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
+     * @param timeout The number of milliseconds to wait before timing out.
+     * @param raw If true, the raw response will be returned instead of the response body.
+     * @param contentType The content type to send. Only used if the `body` is a Buffer.
+     * @param noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
+     * @returns Resolves to the response (body), rejected if a non-2xx status code was returned.
      */
     @timedMatrixClientFunctionCall()
-    public doRequest(method, endpoint, qs = null, body = null, timeout = 60000, raw = false,
-        contentType = "application/json", noEncoding = false, opts?: DoHttpRequestOpts): Promise&lt;any> {
+    public doRequest&lt;IsRaw extends boolean = false, NoEncoding extends boolean = false>(
+        method: "GET" | "POST" | "PUT" | "DELETE",
+        endpoint: string,
+        qs: ParsedUrlQueryInput | null = null,
+        body: any | null = null,
+        timeout = 60000,
+        raw?: IsRaw,
+        contentType = "application/json",
+        noEncoding?: NoEncoding,
+        opts?: DoHttpRequestOpts,
+    ): Promise&lt;IsRaw extends true ? RawResponse&lt;NoEncoding> : ResponseBody&lt;NoEncoding>> {
         if (this.impersonatedUserId) {
             if (!qs) qs = { "user_id": this.impersonatedUserId };
             else qs["user_id"] = this.impersonatedUserId;

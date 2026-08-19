@@ -115,7 +115,7 @@ normal Matrix clients work, with the added complexity of needing to be run on a 
 <p>The bot-sdk can be used to script a simple registration or login script, depending on whether or not an account has
 been made prior to deploying the bot. If you already have an access token, skip this section.</p>
 <p><strong>Registration</strong>:</p>
-<pre class="prettyprint source lang-typescript"><code>import { MatrixAuth } from &quot;matrix-bot-sdk&quot;;
+<pre class="prettyprint source lang-typescript"><code>import { MatrixAuth } from &quot;@vector-im/matrix-bot-sdk&quot;;
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without
@@ -128,7 +128,7 @@ const client = await auth.passwordRegister(&quot;username&quot;, &quot;password&
 console.log(&quot;Copy this access token to your bot's config: &quot;, client.accessToken);
 </code></pre>
 <p><strong>Login</strong> (preferred):</p>
-<pre class="prettyprint source lang-typescript"><code>import { MatrixAuth } from &quot;matrix-bot-sdk&quot;;
+<pre class="prettyprint source lang-typescript"><code>import { MatrixAuth } from &quot;@vector-im/matrix-bot-sdk&quot;;
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without
@@ -147,7 +147,7 @@ console.log(&quot;Copy this access token to your bot's config: &quot;, client.ac
     MatrixClient,
     SimpleFsStorageProvider,
     AutojoinRoomsMixin,
-} from &quot;matrix-bot-sdk&quot;;
+} from &quot;@vector-im/matrix-bot-sdk&quot;;
 
 // This will be the URL where clients can reach your homeserver. Note that this might be different
 // from where the web/chat interface is hosted. The server must support password registration without

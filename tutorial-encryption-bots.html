@@ -109,8 +109,11 @@
 <article>
     <p>Setting up encryption for a bot is easy: simply provide a crypto storage provider in addition to your other storage
 providers and it'll start working behind the scenes.</p>
-<pre class="prettyprint source lang-typescript"><code>const storageProvider = new SimpleFsStorageProvider(&quot;./path/to/bot.json&quot;); // or any other <a href="IStorageProvider.html">IStorageProvider</a>
-const cryptoProvider = new RustSdkCryptoStorageProvider(&quot;./path/to/directory&quot;);
+<pre class="prettyprint source lang-typescript"><code>import { RustSdkCryptoStorageProvider } from &quot;@vector-im/matrix-bot-sdk&quot;;
+import { StoreType } from &quot;@matrix-org/matrix-sdk-crypto-nodejs&quot;;
+
+const storageProvider = new SimpleFsStorageProvider(&quot;./path/to/bot.json&quot;); // or any other <a href="IStorageProvider.html">IStorageProvider</a>
+const cryptoProvider = new RustSdkCryptoStorageProvider(&quot;./path/to/directory&quot;, StoreType.Sqlite); // use Sqlite for now, should be changed if large traffic's expected 
 
 // ⚠⚠ Be sure to back up both `./path/to/bot.json` and `./path/to/directory` when using this setup
 

@@ -445,6 +445,9 @@ export class CryptoClient {
             return;
         }
 
+        // Import any public keys belonging to the bot account that were not uploaded by the bot itself
+        await this.engine.processOutgoingRequests([machine.queryKeysForUsers([machine.userId])]);
+
         LogService.debug("CryptoClient", "Confirming cryptographic identity with recovery key");
         const client = this.client;
         const secretStorageKey = await this.getDefaultSecretStorageKey(key);

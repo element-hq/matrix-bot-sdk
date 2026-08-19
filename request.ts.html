@@ -113,7 +113,7 @@
     
     <section>
         <article>
-            <pre class="prettyprint source linenums"><code>import * as origRequestFn from "request";
+            <pre class="prettyprint source linenums"><code>import { request as origRequestFn } from "undici";
 
 let requestFn = origRequestFn;
 

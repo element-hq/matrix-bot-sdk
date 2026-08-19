@@ -274,7 +274,8 @@ export class RustEngine {
             ? RustEncryptionAlgorithm.MegolmV1AesSha2
             : undefined;
         settings.historyVisibility = historyVis;
-        settings.rotationPeriod = BigInt(encEv.rotationPeriodMs);
+        // `rotationPeriod` is expressed in microseconds, whereas the room state is in milliseconds.
+        settings.rotationPeriod = BigInt(encEv.rotationPeriodMs) * 1000n;
         settings.rotationPeriodMessages = BigInt(encEv.rotationPeriodMessages);
 
         await this.lock.acquire(SYNC_LOCK_NAME, async () => {

@@ -115,8 +115,9 @@
         <article>
             <pre class="prettyprint source linenums"><code>import * as crypto from "crypto";
 
+import type { ParsedUrlQueryInput } from "querystring";
 import { OpenIDConnectToken } from "../models/OpenIDConnect";
-import { doHttpRequest } from "../http";
+import { doHttpRequest, RawResponse, ResponseBody } from "../http";
 import { timedIdentityClientFunctionCall } from "../metrics/decorators";
 import { Policies, TranslatedPolicy } from "../models/Policies";
 import { Metrics } from "../metrics/Metrics";
@@ -309,18 +310,27 @@ export class IdentityClient {
     /**
      * Performs a web request to the server, applying appropriate authorization headers for
      * this client.
-     * @param {"GET"|"POST"|"PUT"|"DELETE"} method The HTTP method to use in the request
-     * @param {string} endpoint The endpoint to call. For example: "/_matrix/identity/v2/account"
-     * @param {any} qs The query string to send. Optional.
-     * @param {any} body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
-     * @param {number} timeout The number of milliseconds to wait before timing out.
-     * @param {boolean} raw If true, the raw response will be returned instead of the response body.
-     * @param {string} contentType The content type to send. Only used if the `body` is a Buffer.
-     * @param {string} noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
-     * @returns {Promise&lt;any>} Resolves to the response (body), rejected if a non-2xx status code was returned.
+     * @param method The HTTP method to use in the request
+     * @param endpoint The endpoint to call. For example: "/_matrix/identity/v2/account"
+     * @param qs The query string to send. Optional.
+     * @param body The request body to send. Optional. Will be converted to JSON unless the type is a Buffer.
+     * @param timeout The number of milliseconds to wait before timing out.
+     * @param raw If true, the raw response will be returned instead of the response body.
+     * @param contentType The content type to send. Only used if the `body` is a Buffer.
+     * @param noEncoding Set to true to disable encoding, and return a Buffer. Defaults to false
+     * @returns Resolves to the response (body), rejected if a non-2xx status code was returned.
      */
     @timedIdentityClientFunctionCall()
-    public doRequest(method, endpoint, qs = null, body = null, timeout = 60000, raw = false, contentType = "application/json", noEncoding = false): Promise&lt;any> {
+    public doRequest&lt;IsRaw extends boolean = false, NoEncoding extends boolean = false>(
+        method: "GET" | "POST" | "PUT" | "DELETE",
+        endpoint: string,
+        qs: ParsedUrlQueryInput | null = null,
+        body: any | null = null,
+        timeout = 60000,
+        raw?: IsRaw,
+        contentType = "application/json",
+        noEncoding?: NoEncoding,
+    ): Promise&lt;IsRaw extends true ? RawResponse&lt;NoEncoding> : ResponseBody&lt;NoEncoding>> {
         const headers = {};
         if (this.accessToken) {
             headers["Authorization"] = `Bearer ${this.accessToken}`;
