@@ -2994,7 +2994,7 @@ describe('MatrixClient', () => {
             http.mock.intercept({
                 method: "POST",
                 path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
-                query: { server_name: serverNames },
+                query: { via: serverNames },
                 body: JSON.stringify({}),
             }).reply(200, { room_id: roomId });
 
