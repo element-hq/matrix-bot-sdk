@@ -2322,8 +2322,17 @@ export class MatrixClient extends EventEmitter {
             else qs["user_id"] = this.impersonatedUserId;
         }
         if (this.impersonatedDeviceId) {
-            if (!qs) qs = { "org.matrix.msc3202.device_id": this.impersonatedDeviceId };
-            else qs["org.matrix.msc3202.device_id"] = this.impersonatedDeviceId;
+            // org.matrix.msc3202.device_id set until we're happy to lose compatibility with Synapse older than v1.141
+            if (!qs) {
+                qs = {
+                    "device_id": this.impersonatedDeviceId,
+                    "org.matrix.msc3202.device_id": this.impersonatedDeviceId
+                };
+            }
+            else {
+                qs["device_id"] = this.impersonatedDeviceId;
+                qs["org.matrix.msc3202.device_id"] = this.impersonatedDeviceId;
+            }
         }
         const headers = {};
         if (this.accessToken) {
