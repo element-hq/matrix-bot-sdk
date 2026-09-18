@@ -227,7 +227,7 @@ describe('Intent', () => {
             http.mock.intercept({
                 method: "GET",
                 path: "/test",
-                query: { user_id: userId, "org.matrix.msc3202.device_id": deviceId },
+                query: { user_id: userId, "device_id": deviceId, "org.matrix.msc3202.device_id": deviceId },
             }).reply(200);
 
             await Promise.all([intent.underlyingClient.doRequest("GET", "/test"), http.flushAllExpected()]);
@@ -279,7 +279,7 @@ describe('Intent', () => {
             http.mock.intercept({
                 method: "GET",
                 path: "/test",
-                query: { user_id: userId, "org.matrix.msc3202.device_id": deviceId },
+                query: { user_id: userId, "device_id": deviceId, "org.matrix.msc3202.device_id": deviceId },
             }).reply(200);
 
             await Promise.all([intent.underlyingClient.doRequest("GET", "/test"), http.flushAllExpected()]);
