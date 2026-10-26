@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import {
     DeviceKeyAlgorithm,
@@ -222,6 +222,53 @@ export class Intent {
             })();
         }
         return this.cryptoSetupPromise;
+    }
+
+    /**
+     * Ensures this intent has a ready device for receiving to-device messages. Uses the keyed
+     * device path when automatic encryption is enabled or encryption setup has already started;
+     * otherwise uses a stable unkeyed device.
+     * @returns {Promise<string>} Resolves to the ready device ID.
+     */
+    @timedIntentFunctionCall()
+    public async ensureToDeviceReady(): Promise<string> {
+        const useEncryption = this.options.intentOptions?.encryption === true || this.cryptoSetupPromise !== undefined;
+        const readinessClient = this.client;
+
+        if (useEncryption) {
+            await this.enableEncryption();
+
+            const cryptoClient = this.client;
+            const deviceId = cryptoClient.crypto.clientDeviceId;
+            if (!deviceId) {
+                throw new Error("Crypto setup completed without an active device ID");
+            }
+
+            const [whoAmI, ownDevices] = await Promise.all([
+                cryptoClient.getWhoAmI(),
+                cryptoClient.getOwnDevices(),
+            ]);
+            if (whoAmI.device_id !== deviceId || !ownDevices.some(device => device.device_id === deviceId)) {
+                throw new Error(`Crypto device ${deviceId} is not active on the intent`);
+            }
+            return deviceId;
+        }
+
+        await this.ensureRegistered();
+        readinessClient.impersonateUserId(this.userId);
+
+        const hash = createHash("sha256")
+            .update(`${this.options.homeserverName}\0${this.options.registration.sender_localpart}`, "utf8")
+            .digest("hex")
+            .slice(0, 32);
+        const deviceId = `BOTSDK_TODEVICE_V1_${hash}`;
+
+        await readinessClient.createDevice(deviceId);
+        const ownDevices = await readinessClient.getOwnDevices();
+        if (!ownDevices.some(device => device.device_id === deviceId)) {
+            throw new Error(`Unkeyed device ${deviceId} was not found after creation`);
+        }
+        return deviceId;
     }
 
     /**
