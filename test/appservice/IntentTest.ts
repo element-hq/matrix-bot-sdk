@@ -909,6 +909,182 @@ describe('Intent', () => {
         });
     });
 
+    describe('ensureToDeviceReady', () => {
+        const userId = "@bot:example.org";
+        const appservice = <Appservice>{ botUserId: userId };
+
+        function createIntent(opts: {
+            token?: string;
+            senderLocalpart?: string;
+            registrationId?: string;
+            autoEncryption?: boolean;
+            cryptoStorage?: IAppserviceCryptoStorageProvider;
+        } = {}): Intent {
+            const intentOptions: IAppserviceOptions = {
+                homeserverName: "example.org",
+                homeserverUrl: "https://localhost",
+                storage: new MemoryStorageProvider(),
+                intentOptions: { encryption: opts.autoEncryption ?? false },
+                registration: {
+                    as_token: opts.token ?? "as-token",
+                    hs_token: "hs-token",
+                    sender_localpart: opts.senderLocalpart ?? "bot",
+                    namespaces: { users: [], aliases: [], rooms: [] },
+                    url: null,
+                    ...(opts.registrationId ? { id: opts.registrationId } : {}),
+                },
+                cryptoStorage: opts.cryptoStorage,
+                port: 9000,
+                bindAddress: "127.0.0.1",
+            };
+            const intent = new Intent(intentOptions, userId, appservice);
+            intent.ensureRegistered = jest.fn().mockResolvedValue(undefined);
+            return intent;
+        }
+
+        function stubUnkeyedClient(intent: Intent, devices: string[] = []) {
+            const client = (intent as any).client;
+            client.createDevice = jest.fn().mockResolvedValue(undefined);
+            client.getOwnDevices = jest.fn().mockResolvedValue(devices.map(deviceId => ({ device_id: deviceId })));
+            return client;
+        }
+
+        function stubCryptoClient(
+            intent: Intent,
+            deviceId = "persisted-device",
+            whoamiDeviceId = deviceId,
+            devices: string[] = [deviceId],
+            setupPromise: Promise<void> = Promise.resolve(),
+        ) {
+            const cryptoClient = {
+                crypto: { clientDeviceId: deviceId },
+                getWhoAmI: jest.fn().mockResolvedValue({ user_id: userId, device_id: whoamiDeviceId }),
+                getOwnDevices: jest.fn().mockResolvedValue(devices.map(deviceId => ({ device_id: deviceId }))),
+            };
+            (intent as any).client = cryptoClient;
+            (intent as any).cryptoSetupPromise = setupPromise;
+            intent.enableEncryption = jest.fn().mockReturnValue(setupPromise);
+            return cryptoClient;
+        }
+
+        it('should use the stable unkeyed device ID when encryption is not enabled', async () => {
+            const cryptoStorage = <IAppserviceCryptoStorageProvider>{ storageForUser: jest.fn() };
+            const intent = createIntent({ cryptoStorage });
+            const client = stubUnkeyedClient(intent, ["BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9"]);
+            const enableEncryptionSpy = jest.spyOn(intent, "enableEncryption");
+
+            const deviceId = await intent.ensureToDeviceReady();
+
+            expect(deviceId).toEqual("BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9");
+            expect(client.createDevice).toHaveBeenCalledWith(deviceId);
+            expect(intent.ensureRegistered).toHaveBeenCalled();
+            expect(enableEncryptionSpy).not.toHaveBeenCalled();
+        });
+
+        it('should reuse the unkeyed ID across restarts and access token changes', async () => {
+            const prepareIntent = (token: string, senderLocalpart = "bot") => {
+                const intent = createIntent({ token, senderLocalpart });
+                const deviceId = senderLocalpart === "bot"
+                    ? "BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9"
+                    : "BOTSDK_TODEVICE_V1_4603b7225cea6145eaae3adb9ba5d34f";
+                stubUnkeyedClient(intent, [deviceId]);
+                return intent;
+            };
+
+            const first = await prepareIntent("first-token").ensureToDeviceReady();
+            const restarted = await prepareIntent("rotated-token").ensureToDeviceReady();
+            const changedIdentity = await prepareIntent("rotated-token", "other").ensureToDeviceReady();
+
+            expect(first).toEqual("BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9");
+            expect(restarted).toEqual(first);
+            expect(changedIdentity).not.toEqual(first);
+        });
+
+        it('should use and verify the persisted crypto device when encryption is configured', async () => {
+            const cryptoStorage = <IAppserviceCryptoStorageProvider>{ storageForUser: jest.fn() };
+            const intent = createIntent({ autoEncryption: true, cryptoStorage });
+            const cryptoClient = stubCryptoClient(intent);
+
+            await expect(intent.ensureToDeviceReady()).resolves.toEqual("persisted-device");
+
+            expect(intent.enableEncryption).toHaveBeenCalled();
+            expect(cryptoClient.getWhoAmI).toHaveBeenCalled();
+            expect(cryptoClient.getOwnDevices).toHaveBeenCalled();
+        });
+
+        it('should await a manually started in-flight crypto setup', async () => {
+            let finishSetup!: () => void;
+            const setupPromise = new Promise<void>(resolve => finishSetup = resolve);
+            const intent = createIntent();
+            stubCryptoClient(intent, "persisted-device", "persisted-device", ["persisted-device"], setupPromise);
+
+            let readinessFinished = false;
+            const readiness = intent.ensureToDeviceReady().then(deviceId => {
+                readinessFinished = true;
+                return deviceId;
+            });
+            await Promise.resolve();
+            expect(readinessFinished).toBe(false);
+
+            finishSetup();
+            await expect(readiness).resolves.toEqual("persisted-device");
+        });
+
+        it('should propagate a rejected crypto setup without creating an unkeyed device', async () => {
+            const intent = createIntent();
+            const client = stubUnkeyedClient(intent);
+            const setupPromise = Promise.reject(new Error("crypto setup failed"));
+            (intent as any).cryptoSetupPromise = setupPromise;
+            intent.enableEncryption = jest.fn().mockReturnValue(setupPromise);
+
+            await expect(intent.ensureToDeviceReady()).rejects.toThrow("crypto setup failed");
+            expect(client.createDevice).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            ["missing from the device list", "persisted-device", []],
+            ["has a mismatched whoami device", "other-device", ["persisted-device"]],
+        ])('should fail when the crypto device is %s', async (_description, whoamiDeviceId, devices) => {
+            const intent = createIntent({ autoEncryption: true });
+            stubCryptoClient(intent, "persisted-device", whoamiDeviceId, devices);
+
+            await expect(intent.ensureToDeviceReady()).rejects.toThrow("is not active on the intent");
+        });
+
+        it('should stay on the unkeyed client if crypto setup starts during readiness', async () => {
+            const intent = createIntent();
+            const client = stubUnkeyedClient(intent);
+            const deviceId = "BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9";
+            let finishCreation!: () => void;
+            let signalCreationStarted!: () => void;
+            const creation = new Promise<void>(resolve => finishCreation = resolve);
+            const creationStarted = new Promise<void>(resolve => signalCreationStarted = resolve);
+            client.createDevice = jest.fn(() => {
+                signalCreationStarted();
+                return creation;
+            });
+            client.getOwnDevices = jest.fn().mockResolvedValue([{ device_id: deviceId }]);
+            const cryptoClient = {
+                crypto: { clientDeviceId: "crypto-device" },
+                getWhoAmI: jest.fn().mockResolvedValue({ device_id: "crypto-device" }),
+                getOwnDevices: jest.fn().mockResolvedValue([{ device_id: "crypto-device" }]),
+            };
+            intent.enableEncryption = jest.fn().mockImplementation(async () => {
+                (intent as any).cryptoSetupPromise = Promise.resolve();
+                (intent as any).client = cryptoClient;
+            });
+
+            const readiness = intent.ensureToDeviceReady();
+            await creationStarted;
+            await intent.enableEncryption();
+            finishCreation();
+
+            await expect(readiness).resolves.toEqual(deviceId);
+            expect(client.getOwnDevices).toHaveBeenCalled();
+            expect(cryptoClient.getOwnDevices).not.toHaveBeenCalled();
+        });
+    });
+
     describe('enableEncryption', () => {
         const userId = "@someone:example.org";
         const botUserId = "@bot:example.org";
@@ -947,6 +1123,43 @@ describe('Intent', () => {
                 },
             };
             intent = new Intent(options, userId, appservice);
+        });
+
+        it('should continue through the existing fallback when createDevice fails', async () => {
+            const userStorage = {
+                readValue: jest.fn().mockResolvedValue("saved-token"),
+                storeValue: jest.fn(),
+            };
+            (intent as any).storage = { storageForUser: jest.fn().mockReturnValue(userStorage) };
+            (intent as any).cryptoStorage = {
+                storageForUser: jest.fn().mockReturnValue({ getDeviceId: jest.fn().mockResolvedValue(null) }),
+            };
+            intent.ensureRegistered = jest.fn().mockResolvedValue(undefined);
+
+            const initialClient = intent.underlyingClient as any;
+            initialClient.getOwnDevices = jest.fn().mockResolvedValue([]);
+            initialClient.getUserDevices = jest.fn().mockResolvedValue({ device_keys: {} });
+            initialClient.createDevice = jest.fn().mockRejectedValue(new Error("device creation failed"));
+
+            const fallbackClient = {
+                getWhoAmI: jest.fn().mockResolvedValue({ user_id: userId }),
+            };
+            const cryptoClient = {
+                impersonateUserId: jest.fn(),
+                crypto: { prepare: jest.fn().mockResolvedValue(undefined) },
+            };
+            const makeClientSpy = jest.spyOn(intent as any, "makeClient").mockImplementation((...args: unknown[]) => {
+                const withCrypto = args[0] === true;
+                (intent as any).client = withCrypto ? cryptoClient : fallbackClient;
+            });
+            (appservice as any).on = jest.fn();
+
+            await expect(intent.enableEncryption()).resolves.toBeUndefined();
+
+            expect(initialClient.createDevice).toHaveBeenCalled();
+            expect(makeClientSpy).toHaveBeenNthCalledWith(1, false, "saved-token");
+            expect(makeClientSpy).toHaveBeenNthCalledWith(2, true, "saved-token");
+            expect(cryptoClient.crypto.prepare).toHaveBeenCalled();
         });
 
         // TODO: Test once device_id impersonation set up

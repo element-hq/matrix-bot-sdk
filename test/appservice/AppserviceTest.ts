@@ -2,7 +2,7 @@ import * as getPort from "get-port";
 import * as simple from "simple-mock";
 import { request } from "undici";
 
-import { Appservice, EventKind, Intent, IPreprocessor } from "../../src";
+import { Appservice, EventKind, IAppserviceToDeviceEvent, Intent, IPreprocessor } from "../../src";
 import { HttpBackend } from "../TestUtils";
 
 type RequestOpts = Parameters<typeof request>[1];
@@ -1088,6 +1088,106 @@ describe('Appservice', () => {
 
             await doCall("/transactions/1", { json: txnBody });
             await doCall("/_matrix/app/v1/transactions/2", { json: txnBody });
+        } finally {
+            appservice.stop();
+        }
+    });
+
+    it('should emit typed to-device events only for valid transaction entries', async () => {
+        const port = await getPort();
+        const hsToken = "s3cret_token";
+        const appservice = new Appservice({
+            port,
+            bindAddress: '',
+            homeserverName: 'example.org',
+            homeserverUrl: 'https://localhost',
+            registration: {
+                as_token: "as_token",
+                hs_token: hsToken,
+                sender_localpart: "_bot_",
+                namespaces: {
+                    users: [{ exclusive: true, regex: "@_prefix_.*:.+" }],
+                    rooms: [],
+                    aliases: [],
+                },
+                url: null,
+            },
+        });
+        appservice.botIntent.ensureRegistered = jest.fn().mockResolvedValue(undefined);
+        appservice.addPreprocessor({
+            processEvent: async (event) => {
+                if (event.type === "org.example.to_device") {
+                    expect(event.unsigned["io.t2bot.sdk.bot.type"]).toEqual("to_device");
+                } else {
+                    expect(event.unsigned["io.t2bot.sdk.bot.type"]).toEqual("ephemeral");
+                }
+                delete event.unsigned;
+            },
+            getSupportedEventTypes: () => ["org.example.to_device", "org.example.ephemeral"],
+        });
+
+        await appservice.begin();
+
+        try {
+            const validToDeviceEvent = {
+                type: "org.example.to_device",
+                sender: "@sender:example.org",
+                to_user_id: "@recipient:example.org",
+                to_device_id: "DEVICE_A",
+                content: { body: "hello" },
+            };
+            const txnBody = {
+                events: [],
+                "de.sorunome.msc2409.to_device": [
+                    validToDeviceEvent,
+                    { type: "org.example.to_device", to_user_id: "@recipient:example.org", content: {} },
+                    { type: "org.example.to_device", sender: "@sender:example.org", content: {} },
+                    { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org" },
+                    { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: {}, to_device_id: 123 },
+                    { sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: {} },
+                ],
+                "de.sorunome.msc2409.ephemeral": [{
+                    type: "org.example.ephemeral",
+                    sender: "@sender:example.org",
+                    to_user_id: "@recipient:example.org",
+                    content: { body: "ordinary ephemeral" },
+                }],
+            };
+
+            const receivedToDeviceEvents: IAppserviceToDeviceEvent[] = [];
+            const receivedEphemeralEvents: unknown[] = [];
+            appservice.on("to-device", event => {
+                const recipientId: string = event.to_user_id;
+                const untrustedContent: unknown = event.content;
+                // @ts-expect-error The SDK must not claim that an application's content is validated.
+                const stringContent: string = event.content;
+                void recipientId;
+                void untrustedContent;
+                void stringContent;
+                receivedToDeviceEvents.push(event);
+            });
+            appservice.once("to-device", event => {
+                const recipientId: string = event.to_user_id;
+                void recipientId;
+            });
+            const removableListener = (_event: IAppserviceToDeviceEvent) => {};
+            appservice.addListener("to-device", removableListener);
+            appservice.removeListener("to-device", removableListener);
+            appservice.addListener("to-device", removableListener);
+            appservice.off("to-device", removableListener);
+            appservice.on("ephemeral.event", event => receivedEphemeralEvents.push(event));
+
+            const response = await request(`http://localhost:${port}/transactions/typed-to-device`, {
+                method: "PUT",
+                query: { access_token: hsToken },
+                body: JSON.stringify(txnBody),
+                headers: { "Content-Type": "application/json" },
+            });
+            expect(await response.body.json()).toMatchObject({});
+
+            expect(receivedToDeviceEvents).toEqual([validToDeviceEvent]);
+            expect(receivedEphemeralEvents).toHaveLength(7);
+            expect(receivedEphemeralEvents[0]).not.toHaveProperty("unsigned");
         } finally {
             appservice.stop();
         }
