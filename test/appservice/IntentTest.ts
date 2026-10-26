@@ -970,12 +970,12 @@ describe('Intent', () => {
         it('should use the stable unkeyed device ID when encryption is not enabled', async () => {
             const cryptoStorage = <IAppserviceCryptoStorageProvider>{ storageForUser: jest.fn() };
             const intent = createIntent({ cryptoStorage });
-            const client = stubUnkeyedClient(intent, ["BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9"]);
+            const client = stubUnkeyedClient(intent, ["BOTSDK_TODEVICE_V1_be62ef9b166c6db228375c5f48e9748d"]);
             const enableEncryptionSpy = jest.spyOn(intent, "enableEncryption");
 
             const deviceId = await intent.ensureToDeviceReady();
 
-            expect(deviceId).toEqual("BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9");
+            expect(deviceId).toEqual("BOTSDK_TODEVICE_V1_be62ef9b166c6db228375c5f48e9748d");
             expect(client.createDevice).toHaveBeenCalledWith(deviceId);
             expect(intent.ensureRegistered).toHaveBeenCalled();
             expect(enableEncryptionSpy).not.toHaveBeenCalled();
@@ -985,8 +985,8 @@ describe('Intent', () => {
             const prepareIntent = (token: string, senderLocalpart = "bot") => {
                 const intent = createIntent({ token, senderLocalpart });
                 const deviceId = senderLocalpart === "bot"
-                    ? "BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9"
-                    : "BOTSDK_TODEVICE_V1_4603b7225cea6145eaae3adb9ba5d34f";
+                    ? "BOTSDK_TODEVICE_V1_be62ef9b166c6db228375c5f48e9748d"
+                    : "BOTSDK_TODEVICE_V1_f25ae3e2b40ef7b2ae597e59bce0405e";
                 stubUnkeyedClient(intent, [deviceId]);
                 return intent;
             };
@@ -995,7 +995,7 @@ describe('Intent', () => {
             const restarted = await prepareIntent("rotated-token").ensureToDeviceReady();
             const changedIdentity = await prepareIntent("rotated-token", "other").ensureToDeviceReady();
 
-            expect(first).toEqual("BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9");
+            expect(first).toEqual("BOTSDK_TODEVICE_V1_be62ef9b166c6db228375c5f48e9748d");
             expect(restarted).toEqual(first);
             expect(changedIdentity).not.toEqual(first);
         });
@@ -1054,7 +1054,7 @@ describe('Intent', () => {
         it('should stay on the unkeyed client if crypto setup starts during readiness', async () => {
             const intent = createIntent();
             const client = stubUnkeyedClient(intent);
-            const deviceId = "BOTSDK_TODEVICE_V1_a52d79d7c482195e1f22772bc3c873a9";
+            const deviceId = "BOTSDK_TODEVICE_V1_be62ef9b166c6db228375c5f48e9748d";
             let finishCreation!: () => void;
             let signalCreationStarted!: () => void;
             const creation = new Promise<void>(resolve => finishCreation = resolve);

@@ -239,14 +239,23 @@ export interface IAppserviceOptions {
 }
 
 /**
- * A to-device event delivered in an application service transaction.
+ * The envelope of a to-device event delivered in an application service transaction.
+ * `Appservice` emits this as its `"to-device"` event after event preprocessing. Unlike the
+ * {@link MatrixClient} `"to-device"` event, this envelope includes the recipient user ID because
+ * application service transactions can contain messages for multiple users. `content` is
+ * untrusted application data and is not validated by the SDK.
  * @category Application services
  */
 export interface IAppserviceToDeviceEvent<TContent = unknown> {
+    /** The Matrix event type. */
     type: string;
+    /** The Matrix user ID that sent the event. */
     sender: string;
+    /** The Matrix user ID that should receive the event. */
     to_user_id: string;
+    /** Untrusted event content supplied by the application. */
     content: TContent;
+    /** The target device ID, when provided by the transaction. */
     to_device_id?: string;
 }
 
@@ -376,10 +385,16 @@ export class Appservice extends EventEmitter {
         this.apis = new AppserviceApis(new MatrixClient(options.homeserverUrl, this.registration.as_token), this.registration.id);
     }
 
-    // EventEmitter does not associate event names with payload types. These overloads type the
-    // appservice-specific event while preserving the general EventEmitter API for all other events.
-    // The forwarding implementations only satisfy TypeScript's overload requirements; runtime
-    // listener behavior remains the standard EventEmitter behavior.
+    /**
+     * Adds a listener for a validated appservice to-device transaction event.
+     * Node's EventEmitter does not associate event names with payload types. This overload gives
+     * the appservice-specific event its payload type while preserving the general EventEmitter API
+     * for all other events. The forwarding implementation satisfies TypeScript's overload
+     * requirements and keeps standard EventEmitter runtime behavior.
+     * @param eventName The appservice event name, `"to-device"`.
+     * @param listener The listener to add.
+     * @returns {this} This appservice instance.
+     */
     public override on(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
     public override on(eventName: string | symbol, listener: (...args: any[]) => void): this;
     public override on(eventName: string | symbol, listener: (...args: any[]) => void): this {
