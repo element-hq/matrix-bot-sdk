@@ -2045,6 +2045,18 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
+     * Creates a device for the authenticated user. An appservice-authorized request can create
+     * a device on homeservers that support this endpoint; the endpoint can also update an existing
+     * device. Request errors are propagated to the caller.
+     * @param {string} deviceId The device ID to create or update.
+     * @returns {Promise<void>} Resolves when the request completes.
+     */
+    @timedMatrixClientFunctionCall()
+    public async createDevice(deviceId: string): Promise<void> {
+        await this.doRequest("PUT", `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, null, {});
+    }
+
+    /**
      * Claims One Time Keys for a set of user devices, returning those keys. The caller is expected to verify
      * and validate the returned keys.
      *

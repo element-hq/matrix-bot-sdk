@@ -161,7 +161,7 @@ export class Intent {
                 try {
                   // Make sure the device is registered. Before Matrix C-S 1.17, this would fail if the device doesn't exist.
                   // After 1.17 (or if `io.element.msc4190` is set in the registration file for Synapse 1.121+), it creates the device on the fly
-                  await this.client.doRequest("PUT", `/_matrix/client/v3/devices/${deviceId}`, null, {});
+                  await this.client.createDevice(deviceId);
                 } catch {
                   deviceId = null;
                 }
