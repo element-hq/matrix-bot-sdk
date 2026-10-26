@@ -239,6 +239,18 @@ export interface IAppserviceOptions {
 }
 
 /**
+ * A to-device event delivered in an application service transaction.
+ * @category Application services
+ */
+export interface IAppserviceToDeviceEvent<TContent = unknown> {
+    type: string;
+    sender: string;
+    to_user_id: string;
+    content: TContent;
+    to_device_id?: string;
+}
+
+/**
  * Represents an application service. This provides helper utilities such as tracking
  * of user intents (clients that are aware of their membership in rooms).
  * @category Application services
@@ -362,6 +374,40 @@ export class Appservice extends EventEmitter {
         this.userPrefix = options.userPrefix !== undefined ? options.userPrefix : getPrefix(this.registration.namespaces.users);
         this.aliasPrefix = options.aliasPrefix !== undefined ? options.aliasPrefix : getPrefix(this.registration.namespaces.aliases);
         this.apis = new AppserviceApis(new MatrixClient(options.homeserverUrl, this.registration.as_token), this.registration.id);
+    }
+
+    // EventEmitter does not associate event names with payload types. These overloads type the
+    // appservice-specific event while preserving the general EventEmitter API for all other events.
+    // The forwarding implementations only satisfy TypeScript's overload requirements; runtime
+    // listener behavior remains the standard EventEmitter behavior.
+    public override on(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
+    public override on(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    public override on(eventName: string | symbol, listener: (...args: any[]) => void): this {
+        return super.on(eventName, listener);
+    }
+
+    public override once(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
+    public override once(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    public override once(eventName: string | symbol, listener: (...args: any[]) => void): this {
+        return super.once(eventName, listener);
+    }
+
+    public override addListener(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
+    public override addListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    public override addListener(eventName: string | symbol, listener: (...args: any[]) => void): this {
+        return super.addListener(eventName, listener);
+    }
+
+    public override off(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
+    public override off(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    public override off(eventName: string | symbol, listener: (...args: any[]) => void): this {
+        return super.off(eventName, listener);
+    }
+
+    public override removeListener(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
+    public override removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    public override removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this {
+        return super.removeListener(eventName, listener);
     }
 
     /**
@@ -775,6 +821,17 @@ export class Appservice extends EventEmitter {
         }
     }
 
+    private isAppserviceToDeviceEvent(event: unknown): event is IAppserviceToDeviceEvent {
+        if (typeof event !== "object" || event === null) return false;
+
+        const eventFields = event as Record<string, unknown>;
+        return typeof eventFields.type === "string" &&
+            typeof eventFields.sender === "string" &&
+            typeof eventFields.to_user_id === "string" &&
+            Object.prototype.hasOwnProperty.call(event, "content") &&
+            (!("to_device_id" in eventFields) || typeof eventFields.to_device_id === "string");
+    }
+
     private async handleTransaction(txnId: string, body: Record<string, unknown>) {
         // Process all the crypto stuff first to ensure that future transactions (if not this one)
         // will decrypt successfully. We start with EDUs because we need structures to put counts
@@ -792,26 +849,33 @@ export class Appservice extends EventEmitter {
             };
         } = {};
 
-        const orderedEdus = [];
+        const orderedEdus: { source: "to-device" | "ephemeral", event: any }[] = [];
         if (Array.isArray(body["de.sorunome.msc2409.to_device"])) {
             orderedEdus.push(...body["de.sorunome.msc2409.to_device"].map(e => ({
-                ...e,
-                unsigned: {
-                    ...e['unsigned'],
-                    [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
+                source: "to-device" as const,
+                event: {
+                    ...e,
+                    unsigned: {
+                        ...e['unsigned'],
+                        [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
+                    },
                 },
             })));
         }
         if (Array.isArray(body["de.sorunome.msc2409.ephemeral"])) {
             orderedEdus.push(...body["de.sorunome.msc2409.ephemeral"].map(e => ({
-                ...e,
-                unsigned: {
-                    ...e['unsigned'],
-                    [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
+                source: "ephemeral" as const,
+                event: {
+                    ...e,
+                    unsigned: {
+                        ...e['unsigned'],
+                        [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
+                    },
                 },
             })));
         }
-        for (let event of orderedEdus) {
+        for (const edu of orderedEdus) {
+            let event = edu.event;
             if (event['edu_type']) event['type'] = event['edu_type']; // handle property change during MSC2409's course
 
             LogService.info("Appservice", `Processing ${event['unsigned'][EDU_ANNOTATION_KEY]} event of type ${event["type"]}`);
@@ -820,7 +884,11 @@ export class Appservice extends EventEmitter {
             // These events aren't tied to rooms, so just emit them generically
             this.emit("ephemeral.event", event);
 
-            if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || event.unsigned?.[EDU_ANNOTATION_KEY] === EduAnnotation.ToDevice)) {
+            if (edu.source === "to-device" && this.isAppserviceToDeviceEvent(event)) {
+                this.emit("to-device", event);
+            }
+
+            if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || edu.source === "to-device")) {
                 const toUser = event["to_user_id"];
                 const intent = this.getIntentForUserId(toUser);
                 await intent.enableEncryption();
