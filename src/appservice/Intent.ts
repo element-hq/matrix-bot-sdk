@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import {
     DeviceKeyAlgorithm,
@@ -161,7 +161,7 @@ export class Intent {
                 try {
                   // Make sure the device is registered. Before Matrix C-S 1.17, this would fail if the device doesn't exist.
                   // After 1.17 (or if `io.element.msc4190` is set in the registration file for Synapse 1.121+), it creates the device on the fly
-                  await this.client.doRequest("PUT", `/_matrix/client/v3/devices/${deviceId}`, null, {});
+                  await this.client.createDevice(deviceId);
                 } catch {
                   deviceId = null;
                 }
@@ -222,6 +222,66 @@ export class Intent {
             })();
         }
         return this.cryptoSetupPromise;
+    }
+
+    /**
+     * Ensures this intent has a registered device for receiving appservice to-device messages.
+     * Uses the keyed device path when automatic encryption is enabled or `enableEncryption()`
+     * has already been called; otherwise it creates or reuses a stable unkeyed device. The path
+     * is chosen when this method is called. The unkeyed client is captured at that point, so
+     * later encryption setup does not change an in-flight unkeyed readiness operation.
+     *
+     * On the unkeyed path, the device ID is `BOTSDK_TODEVICE_V1_` followed by the first 32
+     * lowercase hex digits of SHA-256 over the UTF-8 string
+     * `registration.sender_localpart + ":" + homeserverName`. Device IDs are scoped to each
+     * Matrix user. The ID survives restarts and appservice token rotation; changing either
+     * identity input selects a new device. This method does not delete the old device.
+     *
+     * On the keyed path, the existing crypto device identity is reused. Device registration
+     * alone does not guarantee delivery: the homeserver and appservice registration must support
+     * to-device transactions.
+     *
+     * @returns {Promise<string>} Resolves to the ready device ID.
+     */
+    @timedIntentFunctionCall()
+    public async ensureToDeviceReady(): Promise<string> {
+        const useEncryption = this.options.intentOptions?.encryption === true || this.cryptoSetupPromise !== undefined;
+        const readinessClient = this.client;
+
+        if (useEncryption) {
+            await this.enableEncryption();
+
+            const cryptoClient = this.client;
+            const deviceId = cryptoClient.crypto.clientDeviceId;
+            if (!deviceId) {
+                throw new Error("Crypto setup completed without an active device ID");
+            }
+
+            const [whoAmI, ownDevices] = await Promise.all([
+                cryptoClient.getWhoAmI(),
+                cryptoClient.getOwnDevices(),
+            ]);
+            if (whoAmI.device_id !== deviceId || !ownDevices.some(device => device.device_id === deviceId)) {
+                throw new Error(`Crypto device ${deviceId} is not active on the intent`);
+            }
+            return deviceId;
+        }
+
+        await this.ensureRegistered();
+        readinessClient.impersonateUserId(this.userId);
+
+        const hash = createHash("sha256")
+            .update(`${this.options.registration.sender_localpart}:${this.options.homeserverName}`, "utf8")
+            .digest("hex")
+            .slice(0, 32);
+        const deviceId = `BOTSDK_TODEVICE_V1_${hash}`;
+
+        await readinessClient.createDevice(deviceId);
+        const ownDevices = await readinessClient.getOwnDevices();
+        if (!ownDevices.some(device => device.device_id === deviceId)) {
+            throw new Error(`Unkeyed device ${deviceId} was not found after creation`);
+        }
+        return deviceId;
     }
 
     /**
