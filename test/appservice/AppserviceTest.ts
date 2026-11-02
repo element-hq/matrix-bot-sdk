@@ -1143,6 +1143,9 @@ describe('Appservice', () => {
                     { type: "org.example.to_device", to_user_id: "@recipient:example.org", content: {} },
                     { type: "org.example.to_device", sender: "@sender:example.org", content: {} },
                     { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org" },
+                    { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: null },
+                    { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: "invalid" },
+                    { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: [] },
                     { type: "org.example.to_device", sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: {}, to_device_id: 123 },
                     { sender: "@sender:example.org", to_user_id: "@recipient:example.org", content: {} },
                 ],
@@ -1186,7 +1189,7 @@ describe('Appservice', () => {
             expect(await response.body.json()).toMatchObject({});
 
             expect(receivedToDeviceEvents).toEqual([validToDeviceEvent]);
-            expect(receivedEphemeralEvents).toHaveLength(7);
+            expect(receivedEphemeralEvents).toHaveLength(10);
             expect(receivedEphemeralEvents[0]).not.toHaveProperty("unsigned");
         } finally {
             appservice.stop();

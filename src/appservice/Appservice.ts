@@ -242,18 +242,18 @@ export interface IAppserviceOptions {
  * The envelope of a to-device event delivered in an application service transaction.
  * `Appservice` emits this as its `"to-device"` event after event preprocessing. Unlike the
  * {@link MatrixClient} `"to-device"` event, this envelope includes the recipient user ID because
- * application service transactions can contain messages for multiple users. `content` is
- * untrusted application data and is not validated by the SDK.
+ * application service transactions can contain messages for multiple users. The SDK checks
+ * that `content` is an object but does not validate event-type-specific fields.
  * @category Application services
  */
-export interface IAppserviceToDeviceEvent<TContent = unknown> {
+export interface IAppserviceToDeviceEvent<TContent = Record<string, unknown>> {
     /** The Matrix event type. */
     type: string;
     /** The Matrix user ID that sent the event. */
     sender: string;
     /** The Matrix user ID that should receive the event. */
     to_user_id: string;
-    /** Untrusted event content supplied by the application. */
+    /** Unvalidated content; the SDK does not validate event-type-specific fields. */
     content: TContent;
     /** The target device ID, when provided by the transaction. */
     to_device_id?: string;
@@ -843,7 +843,10 @@ export class Appservice extends EventEmitter {
         return typeof eventFields.type === "string" &&
             typeof eventFields.sender === "string" &&
             typeof eventFields.to_user_id === "string" &&
-            Object.prototype.hasOwnProperty.call(event, "content") &&
+            Object.hasOwn(event, "content") &&
+            typeof eventFields.content === "object" &&
+            eventFields.content !== null &&
+            !Array.isArray(eventFields.content) &&
             (!("to_device_id" in eventFields) || typeof eventFields.to_device_id === "string");
     }
 
