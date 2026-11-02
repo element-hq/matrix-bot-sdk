@@ -386,46 +386,6 @@ export class Appservice extends EventEmitter {
     }
 
     /**
-     * Adds a listener for a validated appservice to-device transaction event.
-     * Node's EventEmitter does not associate event names with payload types. This overload gives
-     * the appservice-specific event its payload type while preserving the general EventEmitter API
-     * for all other events. The forwarding implementation satisfies TypeScript's overload
-     * requirements and keeps standard EventEmitter runtime behavior.
-     * @param eventName The appservice event name, `"to-device"`.
-     * @param listener The listener to add.
-     * @returns {this} This appservice instance.
-     */
-    public override on(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
-    public override on(eventName: string | symbol, listener: (...args: any[]) => void): this;
-    public override on(eventName: string | symbol, listener: (...args: any[]) => void): this {
-        return super.on(eventName, listener);
-    }
-
-    public override once(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
-    public override once(eventName: string | symbol, listener: (...args: any[]) => void): this;
-    public override once(eventName: string | symbol, listener: (...args: any[]) => void): this {
-        return super.once(eventName, listener);
-    }
-
-    public override addListener(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
-    public override addListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
-    public override addListener(eventName: string | symbol, listener: (...args: any[]) => void): this {
-        return super.addListener(eventName, listener);
-    }
-
-    public override off(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
-    public override off(eventName: string | symbol, listener: (...args: any[]) => void): this;
-    public override off(eventName: string | symbol, listener: (...args: any[]) => void): this {
-        return super.off(eventName, listener);
-    }
-
-    public override removeListener(eventName: "to-device", listener: (event: IAppserviceToDeviceEvent) => void): this;
-    public override removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
-    public override removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this {
-        return super.removeListener(eventName, listener);
-    }
-
-    /**
      * Gets the express app instance which is serving requests. Not recommended for
      * general usage, but may be used to append routes to the web server.
      */
