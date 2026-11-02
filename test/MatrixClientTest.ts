@@ -7024,6 +7024,38 @@ describe('MatrixClient', () => {
         }));
     });
 
+    describe('createDevice', () => {
+        it('should encode the device ID and send an empty body', async () => {
+            const { client, http } = createTestClient();
+            const deviceId = "device id/with?reserved=chars";
+
+            http.mock.intercept({
+                method: "PUT",
+                path: "/_matrix/client/v3/devices/" + encodeURIComponent(deviceId),
+            }).reply(200, (opts) => {
+                expect(opts.method).toEqual("PUT");
+                expect(JSON.parse(opts.body as string)).toEqual({});
+                return {};
+            });
+
+            await Promise.all([client.createDevice(deviceId), http.flushAllExpected()]);
+        });
+
+        it('should propagate request errors', async () => {
+            const { client, http } = createTestClient();
+
+            http.mock.intercept({
+                method: "PUT",
+                path: "/_matrix/client/v3/devices/device",
+            }).reply(403, { errcode: "M_FORBIDDEN", error: "Device creation is not allowed" });
+
+            await expect(Promise.all([
+                client.createDevice("device"),
+                http.flushAllExpected(),
+            ])).rejects.toThrow();
+        });
+    });
+
     describe('getRelationsForEvent', () => {
         test.each([
             [null, null],

@@ -239,6 +239,27 @@ export interface IAppserviceOptions {
 }
 
 /**
+ * The envelope of a to-device event delivered in an application service transaction.
+ * `Appservice` emits this as its `"to-device"` event after event preprocessing. Unlike the
+ * {@link MatrixClient} `"to-device"` event, this envelope includes the recipient user ID because
+ * application service transactions can contain messages for multiple users. The SDK checks
+ * that `content` is an object but does not validate event-type-specific fields.
+ * @category Application services
+ */
+export interface IAppserviceToDeviceEvent<TContent = Record<string, unknown>> {
+    /** The Matrix event type. */
+    type: string;
+    /** The Matrix user ID that sent the event. */
+    sender: string;
+    /** The Matrix user ID that should receive the event. */
+    to_user_id: string;
+    /** Unvalidated content; the SDK does not validate event-type-specific fields. */
+    content: TContent;
+    /** The target device ID, when provided by the transaction. */
+    to_device_id?: string;
+}
+
+/**
  * Represents an application service. This provides helper utilities such as tracking
  * of user intents (clients that are aware of their membership in rooms).
  * @category Application services
@@ -775,6 +796,20 @@ export class Appservice extends EventEmitter {
         }
     }
 
+    private isAppserviceToDeviceEvent(event: unknown): event is IAppserviceToDeviceEvent {
+        if (typeof event !== "object" || event === null) return false;
+
+        const eventFields = event as Record<string, unknown>;
+        return typeof eventFields.type === "string" &&
+            typeof eventFields.sender === "string" &&
+            typeof eventFields.to_user_id === "string" &&
+            Object.hasOwn(event, "content") &&
+            typeof eventFields.content === "object" &&
+            eventFields.content !== null &&
+            !Array.isArray(eventFields.content) &&
+            (!("to_device_id" in eventFields) || typeof eventFields.to_device_id === "string");
+    }
+
     private async handleTransaction(txnId: string, body: Record<string, unknown>) {
         // Process all the crypto stuff first to ensure that future transactions (if not this one)
         // will decrypt successfully. We start with EDUs because we need structures to put counts
@@ -792,26 +827,33 @@ export class Appservice extends EventEmitter {
             };
         } = {};
 
-        const orderedEdus = [];
+        const orderedEdus: { source: "to-device" | "ephemeral", event: any }[] = [];
         if (Array.isArray(body["de.sorunome.msc2409.to_device"])) {
             orderedEdus.push(...body["de.sorunome.msc2409.to_device"].map(e => ({
-                ...e,
-                unsigned: {
-                    ...e['unsigned'],
-                    [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
+                source: "to-device" as const,
+                event: {
+                    ...e,
+                    unsigned: {
+                        ...e['unsigned'],
+                        [EDU_ANNOTATION_KEY]: EduAnnotation.ToDevice,
+                    },
                 },
             })));
         }
         if (Array.isArray(body["de.sorunome.msc2409.ephemeral"])) {
             orderedEdus.push(...body["de.sorunome.msc2409.ephemeral"].map(e => ({
-                ...e,
-                unsigned: {
-                    ...e['unsigned'],
-                    [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
+                source: "ephemeral" as const,
+                event: {
+                    ...e,
+                    unsigned: {
+                        ...e['unsigned'],
+                        [EDU_ANNOTATION_KEY]: EduAnnotation.Ephemeral,
+                    },
                 },
             })));
         }
-        for (let event of orderedEdus) {
+        for (const edu of orderedEdus) {
+            let event = edu.event;
             if (event['edu_type']) event['type'] = event['edu_type']; // handle property change during MSC2409's course
 
             LogService.info("Appservice", `Processing ${event['unsigned'][EDU_ANNOTATION_KEY]} event of type ${event["type"]}`);
@@ -820,7 +862,11 @@ export class Appservice extends EventEmitter {
             // These events aren't tied to rooms, so just emit them generically
             this.emit("ephemeral.event", event);
 
-            if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || event.unsigned?.[EDU_ANNOTATION_KEY] === EduAnnotation.ToDevice)) {
+            if (edu.source === "to-device" && this.isAppserviceToDeviceEvent(event)) {
+                this.emit("to-device", event);
+            }
+
+            if (this.cryptoStorage && (event["type"] === "m.room.encrypted" || edu.source === "to-device")) {
                 const toUser = event["to_user_id"];
                 const intent = this.getIntentForUserId(toUser);
                 await intent.enableEncryption();
