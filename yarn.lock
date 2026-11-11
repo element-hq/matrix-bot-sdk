@@ -743,13 +743,13 @@
   dependencies:
     lodash "^4.18.1"
 
-"@matrix-org/matrix-sdk-crypto-nodejs@^0.6.6":
-  version "0.6.6"
-  resolved "https://registry.yarnpkg.com/@matrix-org/matrix-sdk-crypto-nodejs/-/matrix-sdk-crypto-nodejs-0.6.6.tgz#4a25492898e0dfc5445d6015cf5c52ce4323eed6"
-  integrity sha512-JlYSjq9Sm/0QoUXfk6C7JppsOG0ESY8BHEIaQgjQ8iQ0GkhvJrhPZbMJmd77/Bgeahd1GENf8896nauf4ximzQ==
+"@matrix-org/matrix-sdk-crypto-nodejs@^0.7.0":
+  version "0.7.0"
+  resolved "https://registry.yarnpkg.com/@matrix-org/matrix-sdk-crypto-nodejs/-/matrix-sdk-crypto-nodejs-0.7.0.tgz#9edc83562804b473c93983fa92c099c0eb7f113b"
+  integrity sha512-ANbALKMOsK1ppcX6m6XtBTF7O61BIz9vfKdCTnYX/caqSp7NnNmsR8tyS9BmAbvdtrCuNeCIHiWRUQ+R10Zuzg==
   dependencies:
-    https-proxy-agent "^7.0.5"
-    node-downloader-helper "^2.1.9"
+    https-proxy-agent "^7.0.6"
+    node-downloader-helper "^2.1.11"
 
 "@napi-rs/wasm-runtime@^1.1.4":
   version "1.2.2"
@@ -3434,7 +3434,7 @@ http-errors@~2.0.0, http-errors@~2.0.1:
     statuses "~2.0.2"
     toidentifier "~1.0.1"
 
-https-proxy-agent@^7.0.5:
+https-proxy-agent@^7.0.6:
   version "7.0.6"
   resolved "https://registry.yarnpkg.com/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz#da8dfeac7da130b05c2ba4b59c9b6cd66611a6b9"
   integrity sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==
@@ -4653,7 +4653,7 @@ node-dir@^0.1.10:
   dependencies:
     minimatch "^3.0.2"
 
-node-downloader-helper@^2.1.9:
+node-downloader-helper@^2.1.11:
   version "2.1.11"
   resolved "https://registry.yarnpkg.com/node-downloader-helper/-/node-downloader-helper-2.1.11.tgz#cfbc3ff530c369c4a611b428b77f7b443ee5349f"
   integrity sha512-882fH2C9AWdiPCwz/2beq5t8FGMZK9Dx8TJUOIxzMCbvG7XUKM5BuJwN5f0NKo4SCQK6jR4p2TPm54mYGdGchQ==
