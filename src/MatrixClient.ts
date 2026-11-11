@@ -1141,7 +1141,7 @@ export class MatrixClient extends EventEmitter {
         const apiCall = (targetIdOrAlias: string) => {
             targetIdOrAlias = encodeURIComponent(targetIdOrAlias);
             const qs = {};
-            if (viaServers.length > 0) qs['server_name'] = viaServers;
+            if (viaServers.length > 0) qs['via'] = viaServers;
             return this.doRequest("POST", "/_matrix/client/v3/join/" + targetIdOrAlias, qs, {}).then(response => {
                 return response['room_id'];
             });
