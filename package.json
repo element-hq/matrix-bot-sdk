@@ -55,7 +55,7 @@
     "tsconfig.json"
   ],
   "dependencies": {
-    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.6.6",
+    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.7.0",
     "another-json": "^0.2.0",
     "async-lock": "^1.4.0",
     "chalk": "4",
