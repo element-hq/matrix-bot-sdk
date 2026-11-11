@@ -4876,6 +4876,107 @@ describe('MatrixClient', () => {
             expect(getStateEventSpy.callCount).toBe(1);
             expect(sendStateEventSpy.callCount).toBe(1);
         });
+
+        it('should not sent a redundant state event', async () => {
+            const { client } = createTestClient();
+
+            const roomId = "!testing:example.org";
+            const userId = "@testing:example.org";
+            const targetLevel = 65;
+            const basePowerLevels = {
+                ban: 100,
+                users: {
+                    "@alice:example.org": 100,
+                    [userId]: targetLevel,
+                },
+            };
+
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
+                expect(rid).toEqual(roomId);
+                expect(evType).toEqual("m.room.power_levels");
+                expect(stateKey).toEqual("");
+                return basePowerLevels;
+            });
+
+            const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn(() => {
+                return null;
+            });
+
+            await client.setUserPowerLevel(userId, roomId, targetLevel);
+            expect(getStateEventSpy.callCount).toBe(1);
+            expect(sendStateEventSpy.callCount).toBe(0);
+        });
+    });
+
+    describe('resetUserPowerLevel', () => {
+        it('should use the default users power level for the target user ID', async () => {
+            const { client } = createTestClient();
+
+            const roomId = "!testing:example.org";
+            const userId = "@testing:example.org";
+            const basePowerLevels = {
+                ban: 100,
+                users: {
+                    "@alice:example.org": 100,
+                },
+            };
+            const userPowerLevel = {
+                [userId]: 50,
+            };
+
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
+                expect(rid).toEqual(roomId);
+                expect(evType).toEqual("m.room.power_levels");
+                expect(stateKey).toEqual("");
+                return {
+                    ...basePowerLevels,
+                    users: {
+                        ...basePowerLevels.users,
+                        ...userPowerLevel,
+                    },
+                };
+            });
+
+            const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn((rid, evType, stateKey, content) => {
+                expect(rid).toEqual(roomId);
+                expect(evType).toEqual("m.room.power_levels");
+                expect(stateKey).toEqual("");
+                expect(content).toMatchObject(basePowerLevels);
+                return null;
+            });
+
+            await client.resetUserPowerLevel(userId, roomId);
+            expect(getStateEventSpy.callCount).toBe(1);
+            expect(sendStateEventSpy.callCount).toBe(1);
+        });
+
+        it('should not sent a redundant state event', async () => {
+            const { client } = createTestClient();
+
+            const roomId = "!testing:example.org";
+            const userId = "@testing:example.org";
+            const basePowerLevels = {
+                ban: 100,
+                users: {
+                    "@alice:example.org": 100,
+                },
+            };
+
+            const getStateEventSpy = simple.mock(client, "getRoomStateEventContent").callFn((rid, evType, stateKey) => {
+                expect(rid).toEqual(roomId);
+                expect(evType).toEqual("m.room.power_levels");
+                expect(stateKey).toEqual("");
+                return basePowerLevels;
+            });
+
+            const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn(() => {
+                return null;
+            });
+
+            await client.resetUserPowerLevel(userId, roomId);
+            expect(getStateEventSpy.callCount).toBe(1);
+            expect(sendStateEventSpy.callCount).toBe(0);
+        });
     });
 
     describe('userHasPowerLevelFor', () => {
