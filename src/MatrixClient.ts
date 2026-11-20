@@ -50,6 +50,7 @@ import { MatrixContentScannerClient } from "./MatrixContentScannerClient";
 import { MatrixCapabilities } from "./models/Capabilities";
 import { PLManager, PowerLevelAction, PowerLevelBounds } from "./models/PowerLevels";
 import { CreateEvent, CreateEventContent } from "./models/events/CreateEvent";
+import { PowerLevelsEventContent } from "./models/events/PowerLevelsEvent";
 import { IJsonType, Json } from "./helpers/Types";
 
 const SYNC_BACKOFF_MIN_MS = 5000;
@@ -1569,7 +1570,7 @@ export class MatrixClient extends EventEmitter {
     public async userHasPowerLevelFor(userId: string, roomId: string, eventType: string, isState: boolean): Promise<boolean> {
         const pls = new PLManager(
             await this.getRoomCreateEvent(roomId),
-            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+            await this.getRoomPowerLevelsEventContent(roomId),
         );
 
         let requiredPower = isState ? 50 : 0;
@@ -1591,7 +1592,7 @@ export class MatrixClient extends EventEmitter {
     public async userHasPowerLevelForAction(userId: string, roomId: string, action: PowerLevelAction): Promise<boolean> {
         const pls = new PLManager(
             await this.getRoomCreateEvent(roomId),
-            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+            await this.getRoomPowerLevelsEventContent(roomId),
         );
 
         const defaultForActions: { [A in PowerLevelAction]: number } = {
@@ -1634,7 +1635,7 @@ export class MatrixClient extends EventEmitter {
 
         const pls = new PLManager(
             await this.getRoomCreateEvent(roomId),
-            await this.getRoomStateEventContent(roomId, "m.room.power_levels", ""),
+            await this.getRoomPowerLevelsEventContent(roomId),
         );
 
         const targetUserPower = pls.getUserPowerLevel(targetUserId);
@@ -1652,21 +1653,53 @@ export class MatrixClient extends EventEmitter {
     }
 
     /**
-     * Sets the power level for a given user ID in the given room. Note that this is not safe to
-     * call multiple times concurrently as changes are not atomic. This will throw an error if
-     * the user lacks enough permission to change the power level, or if a power level event is
-     * missing from the room.
-     * @param {string} userId The user ID to change
-     * @param {string} roomId The room ID to change the power level in
-     * @param {number} newLevel The integer power level to set the user to.
-     * @returns {Promise<any>} Resolves when complete.
+     * Sets the power level for a given user ID in the given room.
+     * If the specified user ID already has the requested power level, no action is taken.
+     * Note that this is not safe to call multiple times concurrently as changes are not atomic.
+     * @param userId The user ID to change
+     * @param roomId The room ID to change the power level in
+     * @param newLevel The integer power level to set the user to.
+     * @throws If the user lacks enough permission to change the power level,
+     * or if a power level event is missing from the room.
+     * @returns Resolves when complete.
      */
     @timedMatrixClientFunctionCall()
-    public async setUserPowerLevel(userId: string, roomId: string, newLevel: number): Promise<any> {
-        const currentLevels = await this.getRoomStateEventContent(roomId, "m.room.power_levels", "");
-        if (!currentLevels['users']) currentLevels['users'] = {};
-        currentLevels['users'][userId] = newLevel;
+    public async setUserPowerLevel(userId: string, roomId: string, newLevel: number): Promise<void> {
+        const currentLevels = await this.getRoomPowerLevelsEventContent(roomId);
+        const userLevels = currentLevels.users;
+        if (!userLevels) {
+            currentLevels.users = { [userId]: newLevel };
+        } else if (userLevels[userId] !== newLevel) {
+            userLevels[userId] = newLevel;
+        } else {
+            return;
+        }
         await this.sendStateEvent(roomId, "m.room.power_levels", "", currentLevels);
+    }
+
+    /**
+     * Removes any custom-set power level for a given user ID in the given room, causing the
+     * power level for that user ID to fall back to the room's default power level for all users.
+     * If the specified user ID already has no custom power level, no action is taken.
+     * Note that this is not safe to call multiple times concurrently as changes are not atomic.
+     * @param userId The user ID to change
+     * @param roomId The room ID to change the power level in
+     * @throws If the user lacks enough permission to change the power level,
+     * or if a power level event is missing from the room.
+     * @returns Resolves when complete.
+     */
+    @timedMatrixClientFunctionCall()
+    public async resetUserPowerLevel(userId: string, roomId: string): Promise<void> {
+        const currentLevels = await this.getRoomPowerLevelsEventContent(roomId);
+        const userLevels = currentLevels.users;
+        if (userLevels && userId in userLevels) {
+            delete userLevels[userId];
+            await this.sendStateEvent(roomId, "m.room.power_levels", "", currentLevels);
+        }
+    }
+
+    private async getRoomPowerLevelsEventContent(roomId: string): Promise<PowerLevelsEventContent> {
+        return await this.getRoomStateEventContent(roomId, "m.room.power_levels", "");
     }
 
     private async getMediaEndpointPrefix() {
