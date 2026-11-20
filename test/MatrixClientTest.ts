@@ -4838,7 +4838,13 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                expect(content).toMatchObject(Object.assign({}, { users: { [userId]: targetLevel } }, basePowerLevels));
+                expect(content).toEqual({
+                    ...basePowerLevels,
+                    users: {
+                        ...basePowerLevels.users,
+                        [userId]: targetLevel,
+                    },
+                });
                 return null;
             });
 
@@ -4868,7 +4874,12 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                expect(content).toMatchObject(Object.assign({}, { users: { [userId]: targetLevel } }, basePowerLevels));
+                expect(content).toEqual({
+                    ...basePowerLevels,
+                    users: {
+                        [userId]: targetLevel,
+                    },
+                });
                 return null;
             });
 
