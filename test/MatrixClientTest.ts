@@ -2983,8 +2983,18 @@ describe('MatrixClient', () => {
             expect(result).toEqual(roomId);
         });
 
-        it('should call the right endpoint with server names', async () => {
-            const { client, http, hsUrl } = createTestClient();
+        it.each(new Array<[ServerVersions["versions"], string]>(
+            [[], "server_name"],
+            [["v1.11"], "server_name"],
+            [["v1.11", "v1.12"], "via"],
+            [["v1.12"], "via"],
+        ))('should call the right endpoint with server names (on Matrix versions %p)', async (matrixVersions, serverKey) => {
+            const { client, http } = createTestClient(undefined, undefined, undefined, { handleWhoAmI: true, precacheVersions: false });
+
+            http.mock.intercept({
+                method: "GET",
+                path: "/_matrix/client/versions",
+            }).reply(200, { versions: matrixVersions } satisfies ServerVersions);
 
             const roomId = "!testing:example.org";
             const serverNames = ['example.org', 'localhost'];
@@ -2994,7 +3004,7 @@ describe('MatrixClient', () => {
             http.mock.intercept({
                 method: "POST",
                 path: `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
-                query: { via: serverNames },
+                query: { [serverKey]: serverNames },
                 body: JSON.stringify({}),
             }).reply(200, { room_id: roomId });
 
