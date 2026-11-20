@@ -4941,7 +4941,7 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                expect(content).toMatchObject(basePowerLevels);
+                expect(content).toEqual(basePowerLevels);
                 return null;
             });
 
