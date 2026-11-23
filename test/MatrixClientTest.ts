@@ -4831,7 +4831,7 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                return basePowerLevels;
+                return structuredClone(basePowerLevels);
             });
 
             const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn((rid, evType, stateKey, content) => {
@@ -4867,7 +4867,7 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                return basePowerLevels;
+                return structuredClone(basePowerLevels);
             });
 
             const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn((rid, evType, stateKey, content) => {
@@ -4888,7 +4888,7 @@ describe('MatrixClient', () => {
             expect(sendStateEventSpy.callCount).toBe(1);
         });
 
-        it('should not sent a redundant state event', async () => {
+        it('should not send a redundant state event', async () => {
             const { client } = createTestClient();
 
             const roomId = "!testing:example.org";
@@ -4906,7 +4906,7 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                return basePowerLevels;
+                return structuredClone(basePowerLevels);
             });
 
             const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn(() => {
@@ -4961,7 +4961,7 @@ describe('MatrixClient', () => {
             expect(sendStateEventSpy.callCount).toBe(1);
         });
 
-        it('should not sent a redundant state event', async () => {
+        it('should not send a redundant state event', async () => {
             const { client } = createTestClient();
 
             const roomId = "!testing:example.org";
@@ -4977,7 +4977,7 @@ describe('MatrixClient', () => {
                 expect(rid).toEqual(roomId);
                 expect(evType).toEqual("m.room.power_levels");
                 expect(stateKey).toEqual("");
-                return basePowerLevels;
+                return structuredClone(basePowerLevels);
             });
 
             const sendStateEventSpy = simple.mock(client, "sendStateEvent").callFn(() => {
