@@ -1138,10 +1138,14 @@ export class MatrixClient extends EventEmitter {
      */
     @timedMatrixClientFunctionCall()
     public async joinRoom(roomIdOrAlias: string, viaServers: string[] = []): Promise<string> {
+        const qs = {};
+        if (viaServers.length) {
+            const serversKey = await this.doesServerSupportVersion("v1.12") ? "via" : "server_name";
+            qs[serversKey] = viaServers;
+        }
+
         const apiCall = (targetIdOrAlias: string) => {
             targetIdOrAlias = encodeURIComponent(targetIdOrAlias);
-            const qs = {};
-            if (viaServers.length > 0) qs['server_name'] = viaServers;
             return this.doRequest("POST", "/_matrix/client/v3/join/" + targetIdOrAlias, qs, {}).then(response => {
                 return response['room_id'];
             });
