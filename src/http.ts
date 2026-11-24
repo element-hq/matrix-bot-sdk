@@ -1,6 +1,6 @@
 import * as querystring from "querystring";
+import { type Dispatcher, Agent } from "undici";
 
-import type Dispatcher from "undici/types/dispatcher";
 import type { OutgoingHttpHeaders } from "undici/types/header";
 import { LogLevel, LogService } from "./logging/LogService";
 import { getRequestFn } from "./request";
@@ -20,10 +20,15 @@ export interface DoHttpRequestOpts {
 export type ResponseBody<NoEncoding extends boolean> = NoEncoding extends true ? Buffer : any;
 export type RawResponse<NoEncoding extends boolean> = Omit<Dispatcher.ResponseData, "body"> & { body: ResponseBody<NoEncoding> };
 
+const RE_UNIX_URL = /^(?<scheme>.*?):\/\/unix:(?<socketPath>[^:]*):(?<authority>[^?#/]*)(?<path>.*)$/;
+const unixDispatchers = new Map<string, Dispatcher>();
+
 /**
  * Performs a web request to a server.
  * @category Unit testing
  * @param baseUrl The base URL to apply to the call.
+ * To make a request to a Unix domain socket, place "unix:<path-to-socket>:" after the URL scheme.
+ * When doing this, the URL authority component is optional, and defaults to "localhost".
  * @param method The HTTP method to use in the request
  * @param endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
  * @param qs The query string to send. Optional.
@@ -50,6 +55,20 @@ export async function doHttpRequest<IsRaw extends boolean = false, NoEncoding ex
         errorHandler: defaultErrorHandler,
     },
 ): Promise<IsRaw extends true ? RawResponse<NoEncoding> : ResponseBody<NoEncoding>> {
+    let dispatcher: Dispatcher | undefined;
+    {
+        const res = RE_UNIX_URL.exec(baseUrl);
+        if (res) {
+            const { scheme, socketPath, authority, path } = res.groups!;
+            baseUrl = `${scheme}://${authority || "localhost"}${path}`;
+            dispatcher = unixDispatchers.get(socketPath);
+            if (!dispatcher) {
+                dispatcher = new Agent({ connect: { socketPath } });
+                unixDispatchers.set(socketPath, dispatcher);
+            }
+        }
+    }
+
     if (!endpoint.startsWith('/')) {
         endpoint = '/' + endpoint;
     }
@@ -85,6 +104,7 @@ export async function doHttpRequest<IsRaw extends boolean = false, NoEncoding ex
         bodyTimeout: timeout,
         headers,
         body,
+        dispatcher,
     }).catch((e) => {
         LogService.error("MatrixHttpClient", "(REQ-" + requestId + ")", e);
         throw e;
