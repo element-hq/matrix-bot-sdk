@@ -2,7 +2,7 @@
 
 [![npm version](https://badge.fury.io/js/@vector-im%2Fmatrix-bot-sdk.svg)](https://www.npmjs.com/package/@vector-im/matrix-bot-sdk)
 
-TypeScript/JavaScript SDK for Matrix bots. For help and support, visit [#matrix-bot-sdk:t2bot.io](https://matrix.to/#/#matrix-bot-sdk:t2bot.io)
+TypeScript/JavaScript SDK for Matrix bots. For help and support, please [search open issues](https://github.com/element-hq/matrix-bot-sdk/issues) before opening a new one.
 
 # Documentation
 
