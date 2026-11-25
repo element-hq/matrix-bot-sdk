@@ -20,7 +20,7 @@ export interface DoHttpRequestOpts {
 export type ResponseBody<NoEncoding extends boolean> = NoEncoding extends true ? Buffer : any;
 export type RawResponse<NoEncoding extends boolean> = Omit<Dispatcher.ResponseData, "body"> & { body: ResponseBody<NoEncoding> };
 
-const RE_UNIX_URL = /^(?<scheme>.*?):\/\/unix:(?<socketPath>[^:]*):(?<authority>[^?#/]*)(?<path>.*)$/;
+const RE_UNIX_URL = /^(?<prefix>.+?):\/\/unix:(?<socketPath>\/[^:]+)(?::(?<authority>[^/?#]*)(?<suffix>.*))?$/;
 const unixDispatchers = new Map<string, Dispatcher>();
 
 /**
@@ -28,7 +28,9 @@ const unixDispatchers = new Map<string, Dispatcher>();
  * @category Unit testing
  * @param baseUrl The base URL to apply to the call.
  * To make a request to a Unix domain socket, place "unix:<path-to-socket>:" after the URL scheme.
- * When doing this, the URL authority component is optional, and defaults to "localhost".
+ * The socket path must be absolute (i.e. must begin with "/") and may not contain a ":" character.
+ * When a socket path is provided, the URL authority component is optional and defaults to "localhost";
+ * and if neither a component nor a path are provided, the trailing ":" may be omitted.
  * @param method The HTTP method to use in the request
  * @param endpoint The endpoint to call. For example: "/_matrix/client/v3/account/whoami"
  * @param qs The query string to send. Optional.
@@ -59,8 +61,8 @@ export async function doHttpRequest<IsRaw extends boolean = false, NoEncoding ex
     {
         const res = RE_UNIX_URL.exec(baseUrl);
         if (res) {
-            const { scheme, socketPath, authority, path } = res.groups!;
-            baseUrl = `${scheme}://${authority || "localhost"}${path}`;
+            const { prefix, socketPath, authority, suffix } = res.groups!;
+            baseUrl = `${prefix}://${authority || "localhost"}${suffix ?? ""}`;
             dispatcher = unixDispatchers.get(socketPath);
             if (!dispatcher) {
                 dispatcher = new Agent({ connect: { socketPath } });
