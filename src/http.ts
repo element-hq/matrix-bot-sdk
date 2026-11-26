@@ -20,7 +20,7 @@ export interface DoHttpRequestOpts {
 export type ResponseBody<NoEncoding extends boolean> = NoEncoding extends true ? Buffer : any;
 export type RawResponse<NoEncoding extends boolean> = Omit<Dispatcher.ResponseData, "body"> & { body: ResponseBody<NoEncoding> };
 
-const RE_UNIX_URL = /^(?<prefix>.+?):\/\/unix:(?<socketPath>\/[^:]+)(?::(?<authority>[^/?#]*)(?<suffix>.*))?$/;
+const RE_UNIX_URL = /^(?<prefix>.+?):\/\/unix:(?<socketPath>\/[^:]+)(?::(?<authority>[^/?#]*)(?<suffix>.*))?/;
 const unixDispatchers = new Map<string, Dispatcher>();
 
 /**
